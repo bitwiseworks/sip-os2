@@ -446,6 +446,11 @@ class Makefile:
 
                 py_lib = "python%u.%u" % ((self.config.py_version >> 16), ((self.config.py_version >> 8) & 0xff))
                 libs.append(self.platform_lib(py_lib))
+            elif sys.platform == "os2knix":
+                libdir.append(self.config.py_lib_dir)
+
+                py_lib = "python%u.%u" % ((self.config.py_version >> 16), ((self.config.py_version >> 8) & 0xff))
+                libs.append(self.platform_lib(py_lib))
             elif sys.platform == "win32":
                 libdir.append(self.config.py_lib_dir)
 
@@ -856,6 +861,8 @@ class Makefile:
 
         if self._debug:
             if sys.platform == "win32":
+                lib = lib + "d"
+            elif sys.platform == "os2knix":
                 lib = lib + "d"
             elif sys.platform == "darwin":
                 if not self._is_framework(mname):
@@ -1517,6 +1524,9 @@ class ModuleMakefile(Makefile):
         if sys.platform == "win32" and debug:
             self._target = self._target + "_d"
 
+        if sys.platform == "os2knix" and debug:
+            self._target = self._target + "_d"
+
     def finalise(self):
         """Finalise the macros common to all module Makefiles.
         """
@@ -1637,6 +1647,8 @@ class ModuleMakefile(Makefile):
                 ext = "a"
         else:
             if sys.platform == "win32":
+                ext = "pyd"
+            elif sys.platform == "os2knix":
                 ext = "pyd"
             elif sys.platform == "darwin":
                 ext = "so"
@@ -1844,7 +1856,7 @@ class ProgramMakefile(Makefile):
         # The name of the executable.
         self._target, _ = os.path.splitext(source)
 
-        if sys.platform in ("win32", "cygwin"):
+        if sys.platform in ("win32", "cygwin", "os2knix"):
             exe = self._target + ".exe"
         else:
             exe = self._target
@@ -1952,7 +1964,7 @@ class ProgramMakefile(Makefile):
 
         target = self._build["target"]
 
-        if sys.platform in ("win32", "cygwin"):
+        if sys.platform in ("win32", "cygwin", "os2knix"):
             target = target + ".exe"
 
         mfile.write("TARGET = %s\n" % target)

@@ -146,6 +146,7 @@ def set_build_platform():
         "openbsd":      "openbsd-g++",
         "openunix":     "unixware-cc",
         "osf1":         "tru64-cxx",
+        "os2knix":      "os2-g++" ,
         "qnx":          "qnx-g++",
         "reliantunix":  "reliant-cds",
         "sco_sv":       "sco-cc",
