@@ -872,7 +872,7 @@ class Makefile:
 
         qt5_rename = False
 
-        if sys.platform == "win32" and "shared" in self.config.qt_winconfig.split():
+        if sys.platform in ("win32", "os2knix") and "shared" in self.config.qt_winconfig.split():
             if (mname in ("QtCore", "QtDeclarative", "QtDesigner", "QtGui",
                           "QtHelp", "QtMultimedia", "QtNetwork", "QtOpenGL",
                           "QtScript", "QtScriptTools", "QtSql", "QtSvg",
@@ -1218,7 +1218,7 @@ class Makefile:
         # These probably don't matter.
         if self.generator == "MINGW":
             mfile.write(".SUFFIXES: .cpp .cxx .cc .C .c\n\n")
-        elif self.generator == "UNIX":
+        elif self.generator in ("UNIX", "GNUMAKE"):
             mfile.write(".SUFFIXES: .c .o .cpp .cc .cxx .C\n\n")
         else:
             mfile.write(".SUFFIXES: .c .cpp .cc .cxx .C\n\n")
@@ -1316,12 +1316,12 @@ class Makefile:
         strip is set if the files should be stripped after been installed.
         """
         # Help package builders.
-        if self.generator == "UNIX":
+        if self.generator in ("UNIX", "GNUMAKE"):
             dst = "$(DESTDIR)" + dst
 
         mfile.write("\t@%s %s " % (self.chkdir, _quote(dst)))
 
-        if self.generator == "UNIX":
+        if self.generator in ("UNIX", "GNUMAKE"):
             mfile.write("|| ")
 
         mfile.write("%s %s\n" % (self.mkdir, _quote(dst)))
@@ -1403,7 +1403,7 @@ class ParentMakefile(Makefile):
         for d in self._subdirs:
             if self.generator == "MINGW":
                 mfile.write("\t@$(MAKE) -C %s%s\n" % (d, tname))
-            elif self.generator == "UNIX":
+            elif self.generator in ("UNIX", "GNUMAKE"):
                 mfile.write("\t@(cd %s; $(MAKE)%s)\n" % (d, tname))
             else:
                 mfile.write("\tcd %s\n" % d)
