@@ -1079,6 +1079,12 @@ class Makefile:
             except KeyError:
                 bdict[i] = ""
 
+        # Create the targetshort if not found.
+        try:
+            bdict["targetshort"]
+        except KeyError:
+            bdict["targetshort"] = bdict["target"]
+
         # Generate the list of objects.
         if self.generator in ("MSVC", "MSVC.NET", "MSBUILD", "BMAKE"):
             ext = ".obj"
@@ -1306,7 +1312,7 @@ class Makefile:
         """
         mfile.write("\nclean:\n")
 
-    def install_file(self, mfile, src, dst, strip=0):
+    def install_file(self, mfile, src, dst, strip=0, symlink=0):
         """Install one or more files in a directory.
 
         mfile is the file object.
@@ -1340,6 +1346,10 @@ class Makefile:
             target = _quote(os.path.join(dst, os.path.basename(sf)))
 
             mfile.write("\t%s %s %s\n" % (self.copy, _quote(sf), target))
+
+            if symlink:
+                if self._target != self._targetorg:
+                    mfile.write("\t(cd %s ; %s %s %s)\n" % (dst, "ln -sf", self._target + self.ext, self._targetorg + self.ext))
 
             if strip:
                 mfile.write("\t%s %s\n" % (strip_cmd, target))
@@ -1511,6 +1521,7 @@ class ModuleMakefile(Makefile):
 
         # Save the target name for later.
         self._target = self._build["target"]
+        self._targetshort = self._build["targetshort"]
 
         # The name of the module entry point is Python version specific.
         if self.config.py_version >= 0x030000:
@@ -1659,6 +1670,17 @@ class ModuleMakefile(Makefile):
                 if not ext:
                     ext = self.optional_string("EXTENSION_SHLIB", "so")
 
+        self.ext = "." + ext
+        # on os2 we need to truncate dll to max 8.3 if not a static lib
+        # here we use targetshort to compare
+        self._targetorg = self._target
+        if sys.platform == "os2knix":
+            if not self.static:
+                if len(self._targetshort) > 8:
+                    self._target = self._targetshort[0:8]
+                else:
+                    self._target = self._targetshort
+
         mfile.write("TARGET = %s\n" % (self._target + "." + ext))
         mfile.write("OFILES = %s\n" % self._build["objects"])
         mfile.write("HFILES = %s %s\n" % (self._build["headers"], self._build["moc_headers"]))
@@ -1767,7 +1789,7 @@ class ModuleMakefile(Makefile):
             self._install_dir = self.config.default_mod_dir
 
         mfile.write("\ninstall: $(TARGET)\n")
-        self.install_file(mfile, "$(TARGET)", self._install_dir, self._strip)
+        self.install_file(mfile, "$(TARGET)", self._install_dir, self._strip, 1)
 
     def generate_target_clean(self, mfile):
         """Generate the clean target.

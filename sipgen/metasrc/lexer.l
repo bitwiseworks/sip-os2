@@ -173,6 +173,7 @@ SIP_QOBJECT                 {return TK_QOBJECT;}
 <directive>call_super_init  {return TK_CALLSUPERINIT;}
 <directive>default_VirtualErrorHandler  {return TK_DEFERRORHANDLER;}
 <directive>version          {return TK_VERSION;}
+<directive>nameshort        {return TK_NAMESHORT;}
 
 <directive>True             {return TK_TRUE_VALUE;}
 <directive>False            {return TK_FALSE_VALUE;}

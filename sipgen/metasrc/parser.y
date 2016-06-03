@@ -176,7 +176,7 @@ static moduleDef *configureModule(sipSpec *pt, moduleDef *module,
         const char *filename, const char *name, int version, int c_module,
         KwArgs kwargs, int use_arg_names, int call_super_init,
         int all_raise_py_exc, const char *def_error_handler,
-        codeBlock *docstring);
+        codeBlock *docstring, const char *nameshort);
 static void addAutoPyName(moduleDef *mod, const char *remove_leading);
 static KwArgs convertKwArgs(const char *kwargs);
 static void checkAnnos(optFlags *annos, const char *valid[]);
@@ -377,6 +377,7 @@ static void checkEllipsis(signatureDef *sd);
 %token          TK_CALLSUPERINIT
 %token          TK_DEFERRORHANDLER
 %token          TK_VERSION
+%token          TK_NAMESHORT
 
 %type <memArg>          argvalue
 %type <memArg>          argtype
@@ -1795,7 +1796,7 @@ module: TK_MODULE module_args module_body {
                         currentContext.filename, $2.name, $2.version,
                         $2.c_module, $2.kwargs, $2.use_arg_names,
                         $2.call_super_init, $2.all_raise_py_exc,
-                        $2.def_error_handler, $3.docstring);
+                        $2.def_error_handler, $3.docstring, $2.nameshort);
         }
     |   TK_CMODULE dottedname optnumber {
             deprecated("%CModule is deprecated, use %Module and the 'language' argument instead");
@@ -1803,7 +1804,7 @@ module: TK_MODULE module_args module_body {
             if (notSkipping())
                 currentModule = configureModule(currentSpec, currentModule,
                         currentContext.filename, $2, $3, TRUE, defaultKwArgs,
-                        FALSE, -1, FALSE, NULL, NULL);
+                        FALSE, -1, FALSE, NULL, NULL, NULL);
         }
     ;
 
@@ -1814,6 +1815,7 @@ module_args:    dottedname {resetLexerState();} optnumber {
             $$.c_module = FALSE;
             $$.kwargs = defaultKwArgs;
             $$.name = $1;
+            $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
@@ -1834,6 +1836,7 @@ module_arg_list:    module_arg
             case TK_KWARGS: $$.kwargs = $3.kwargs; break;
             case TK_LANGUAGE: $$.c_module = $3.c_module; break;
             case TK_NAME: $$.name = $3.name; break;
+            case TK_NAMESHORT: $$.nameshort = $3.nameshort; break;
             case TK_USEARGNAMES: $$.use_arg_names = $3.use_arg_names; break;
             case TK_ALLRAISEPYEXC: $$.all_raise_py_exc = $3.all_raise_py_exc; break;
             case TK_CALLSUPERINIT: $$.call_super_init = $3.call_super_init; break;
@@ -1849,6 +1852,7 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.c_module = FALSE;
             $$.kwargs = convertKwArgs($3);
             $$.name = NULL;
+            $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
@@ -1867,6 +1871,7 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
 
             $$.kwargs = defaultKwArgs;
             $$.name = NULL;
+            $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
@@ -1879,6 +1884,20 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.c_module = FALSE;
             $$.kwargs = defaultKwArgs;
             $$.name = $3;
+            $$.nameshort = NULL;
+            $$.use_arg_names = FALSE;
+            $$.all_raise_py_exc = FALSE;
+            $$.call_super_init = -1;
+            $$.def_error_handler = NULL;
+            $$.version = -1;
+        }
+    |   TK_NAMESHORT '=' dottedname {
+            $$.token = TK_NAMESHORT;
+
+            $$.c_module = FALSE;
+            $$.kwargs = defaultKwArgs;
+            $$.name = NULL;
+            $$.nameshort = $3;
             $$.use_arg_names = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
@@ -1891,6 +1910,7 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.c_module = FALSE;
             $$.kwargs = defaultKwArgs;
             $$.name = NULL;
+            $$.nameshort = NULL;
             $$.use_arg_names = $3;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
@@ -1903,6 +1923,7 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.c_module = FALSE;
             $$.kwargs = defaultKwArgs;
             $$.name = NULL;
+            $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
             $$.all_raise_py_exc = $3;
             $$.call_super_init = -1;
@@ -1915,6 +1936,7 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.c_module = FALSE;
             $$.kwargs = defaultKwArgs;
             $$.name = NULL;
+            $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = $3;
@@ -1927,6 +1949,7 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.c_module = FALSE;
             $$.kwargs = defaultKwArgs;
             $$.name = NULL;
+            $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
@@ -1942,6 +1965,7 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.c_module = FALSE;
             $$.kwargs = defaultKwArgs;
             $$.name = NULL;
+            $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
@@ -9051,7 +9075,7 @@ static moduleDef *configureModule(sipSpec *pt, moduleDef *module,
         const char *filename, const char *name, int version, int c_module,
         KwArgs kwargs, int use_arg_names, int call_super_init,
         int all_raise_py_exc, const char *def_error_handler,
-        codeBlock *docstring)
+        codeBlock *docstring, const char *nameshort)
 {
     moduleDef *mod;
 
@@ -9079,6 +9103,9 @@ static moduleDef *configureModule(sipSpec *pt, moduleDef *module,
     module->virt_error_handler = def_error_handler;
     module->version = version;
     appendCodeBlock(&module->docstring, docstring);
+
+    if (nameshort != NULL)
+        module->nameshort = nameshort;
 
     if (all_raise_py_exc)
         setAllRaisePyException(module);

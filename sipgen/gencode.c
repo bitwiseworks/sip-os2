@@ -364,10 +364,13 @@ static void generateBuildFile(sipSpec *pt, const char *buildFile,
         const char *srcSuffix, const char *consModule)
 {
     const char *mname = pt->module->name;
+    const char *mnameshort = pt->module->nameshort;
     FILE *fp;
 
     fp = createFile(pt->module, buildFile, NULL, FALSE);
 
+    if (mnameshort != NULL)
+        prcode(fp, "targetshort = %s\n", mnameshort);
     prcode(fp, "target = %s\nsources =", mname);
 
     if (isComposite(pt->module))
