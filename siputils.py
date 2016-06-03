@@ -1778,7 +1778,13 @@ class ModuleMakefile(Makefile):
                         mfile.write("\t@echo '#!' >%s.exp" % self._target)
                         mfile.write("; \\\n\t echo '%s' >>%s.exp\n" % (self._entry_point, self._target))
 
-                mfile.write("\t$(LINK) $(LFLAGS) -o $(TARGET) $(OFILES) $(LIBS)\n")
+                if sys.platform == 'os2knix':
+                    mfile.write("\t@echo 'LIBRARY %s INITINSTANCE TERMINSTANCE' >%s.def\n" % (self._target, self._target))
+                    mfile.write("\t@echo 'DESCRIPTION \"%s\"' >>%s.def\n" % (self._targetorg, self._target))
+                    mfile.write("\t@echo 'DATA MULTIPLE NONSHARED' >>%s.def\n" % (self._target))
+                    mfile.write("\t$(LINK) $(LFLAGS) %s.def -o $(TARGET) $(OFILES) $(LIBS)\n" %(self._target))
+                else:
+                    mfile.write("\t$(LINK) $(LFLAGS) -o $(TARGET) $(OFILES) $(LIBS)\n")
 
     def generate_target_install(self, mfile):
         """Generate the install target.
