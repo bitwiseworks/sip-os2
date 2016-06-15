@@ -68,7 +68,7 @@ class build_ext (build_ext_base):
     def _find_sip(self):
         import sipconfig
         cfg = sipconfig.Configuration()
-        if os.name == "nt":
+        if os.name in ("nt" "os2"):
             if not os.path.splitext(os.path.basename(cfg.sip_bin))[1]:
                 return cfg.sip_bin + ".exe"
         return cfg.sip_bin
