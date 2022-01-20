@@ -1,7 +1,7 @@
 /*
  * The SIP lexer.
  *
- * Copyright (c) 2016 Riverbank Computing Limited <info@riverbankcomputing.com>
+ * Copyright (c) 2021 Riverbank Computing Limited <info@riverbankcomputing.com>
  *
  * This file is part of SIP.
  *
@@ -78,7 +78,8 @@ static void fatallex(char *);
 ^[ \t]*%CModule             {return TK_CMODULE;}
 ^[ \t]*%CompositeModule     {BEGIN directive_start; return TK_COMPOMODULE;}
 ^[ \t]*%ConsolidatedModule  {BEGIN directive_start; return TK_CONSMODULE;}
-^[ \t]*%DefaultDocstringFormat  {BEGIN directive_start; return TK_DEFDOCSTRING;}
+^[ \t]*%DefaultDocstringFormat  {BEGIN directive_start; return TK_DEFDOCSTRFMT;}
+^[ \t]*%DefaultDocstringSignature   {BEGIN directive_start; return TK_DEFDOCSTRSIG;}
 ^[ \t]*%DefaultEncoding     {BEGIN directive_start; return TK_DEFENCODING;}
 ^[ \t]*%DefaultMetatype     {BEGIN directive_start; return TK_DEFMETATYPE;}
 ^[ \t]*%DefaultSupertype    {BEGIN directive_start; return TK_DEFSUPERTYPE;}
@@ -86,6 +87,7 @@ static void fatallex(char *);
 <directive_start>^[ \t]*%End    {BEGIN INITIAL; return TK_END;}
 ^[ \t]*%Exception           {return TK_EXCEPTION;}
 ^[ \t]*%Feature             {BEGIN directive_start; return TK_FEATURE;}
+^[ \t]*%HideNamespace       {BEGIN directive_start; return TK_HIDE_NS;}
 ^[ \t]*%If                  {return TK_IF;}
 ^[ \t]*%Import              {BEGIN directive_start; return TK_IMPORT;}
 ^[ \t]*%Include             {BEGIN directive_start; return TK_INCLUDE;}
@@ -133,6 +135,8 @@ operator                    {return TK_OPERATOR;}
 throw                       {return TK_THROW;}
 explicit                    {return TK_EXPLICIT;}
 template                    {return TK_TEMPLATE;}
+final                       {return TK_FINAL;}
+size_t                      {return TK_SIZET;}
 ::                          {return TK_SCOPE;}
 \|\|                        {return TK_LOGICAL_OR;}
 SIP_PYOBJECT                {return TK_PYOBJECT;}
@@ -151,6 +155,7 @@ SIP_RXOBJ_DIS               {return TK_SIPRXDIS;}
 SIP_SLOT_CON                {return TK_SIPSLOTCON;}
 SIP_SLOT_DIS                {return TK_SIPSLOTDIS;}
 SIP_SSIZE_T                 {return TK_SIPSSIZET;}
+Py_ssize_t                  {return TK_SIPSSIZET;}
 SIP_QOBJECT                 {return TK_QOBJECT;}
 \.\.\.                      {return TK_ELLIPSIS;}
 
@@ -169,6 +174,7 @@ SIP_QOBJECT                 {return TK_QOBJECT;}
 <directive>timestamp        {return TK_TIMESTAMP;}
 <directive>type             {return TK_TYPE;}
 <directive>use_argument_names   {return TK_USEARGNAMES;}
+<directive>use_limited_api  {return TK_USELIMITEDAPI;}
 <directive>all_raise_py_exception   {return TK_ALLRAISEPYEXC;}
 <directive>call_super_init  {return TK_CALLSUPERINIT;}
 <directive>default_VirtualErrorHandler  {return TK_DEFERRORHANDLER;}
@@ -256,23 +262,34 @@ SIP_QOBJECT                 {return TK_QOBJECT;}
 }
 
 
-\"[^"\n]*["\n] {
+\"(\\.|[^\\"])*\" {
     /* A double-quoted string. */
-    char *dp, *sp;
+    char ch, *dp, *sp;
 
-    /* Copy the string without the quotes. */
-
-    yylval.text = sipMalloc(strlen(yytext) + 1);
+    /*
+     * Copy the string without the quotes and interpret any standard escape
+     * characters.
+     */
+    yylval.text = sipMalloc(strlen(yytext) - 2 + 1);
 
     dp = yylval.text;
-    sp = yytext;
+    sp = yytext + 1;
 
-    while (*sp != '\0')
+    while ((ch = *sp++) != '"' && ch != '\0')
     {
-        if (*sp != '"')
-            *dp++ = *sp;
+        if (ch == '\\')
+        {
+            ch = *sp++;
 
-        ++sp;
+            if (ch == 'n')
+                ch = '\n';
+            else if (ch == 'r')
+                ch = '\r';
+            else if (ch == 't')
+                ch = '\t';
+        }
+
+        *dp++ = ch;
     }
 
     *dp = '\0';
@@ -412,6 +429,12 @@ SIP_QOBJECT                 {return TK_QOBJECT;}
     return TK_METHODCODE;
 }
 
+^[ \t]*%PreMethodCode {
+    /* The start of a C++ code block to insert before the MethodCode. */
+    codeIdx = 0;
+    return TK_PREMETHODCODE;
+}
+
 ^[ \t]*%VirtualCallCode {
     /* The start of a C++ virtual call code block. */
     codeIdx = 0;
@@ -513,6 +536,9 @@ SIP_QOBJECT                 {return TK_QOBJECT;}
 ^[ \t]*%Docstring {
     /* The start of a docstring block. */
     codeIdx = 0;
+
+    BEGIN directive_start;
+
     return TK_DOCSTRING;
 }
 

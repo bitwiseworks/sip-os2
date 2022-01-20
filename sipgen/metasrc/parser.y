@@ -1,7 +1,7 @@
 /*
  * The SIP parser.
  *
- * Copyright (c) 2015 Riverbank Computing Limited <info@riverbankcomputing.com>
+ * Copyright (c) 2018 Riverbank Computing Limited <info@riverbankcomputing.com>
  *
  * This file is part of SIP.
  *
@@ -31,6 +31,7 @@
 
 
 static sipSpec *currentSpec;            /* The current spec being parsed. */
+static int strictParse;                 /* Set if the platform is enforced. */
 static stringList *backstops;           /* The list of backstops. */
 static stringList *neededQualifiers;    /* The list of required qualifiers. */
 static stringList *excludedQualifiers;  /* The list of excluded qualifiers. */
@@ -38,7 +39,7 @@ static moduleDef *currentModule;        /* The current module being parsed. */
 static mappedTypeDef *currentMappedType;    /* The current mapped type. */
 static enumDef *currentEnum;            /* The current enum being parsed. */
 static int sectionFlags;                /* The current section flags. */
-static int currentOverIsVirt;           /* Set if the overload is virtual. */
+static int currentIsVirt;               /* Set if the callable is virtual. */
 static int currentCtorIsExplicit;       /* Set if the ctor is explicit. */
 static int currentIsStatic;             /* Set if the current is static. */
 static int currentIsSignal;             /* Set if the current is Q_SIGNAL. */
@@ -46,13 +47,15 @@ static int currentIsSlot;               /* Set if the current is Q_SLOT. */
 static int currentIsTemplate;           /* Set if the current is a template. */
 static char *previousFile;              /* The file just parsed. */
 static parserContext currentContext;    /* The current context. */
-static int skipStackPtr;                /* The skip stack pointer. */
+static int stackPtr;                    /* The stack pointer. */
 static int skipStack[MAX_NESTED_IF];    /* Stack of skip flags. */
 static classDef *scopeStack[MAX_NESTED_SCOPE];  /* The scope stack. */
 static int sectFlagsStack[MAX_NESTED_SCOPE];    /* The section flags stack. */
 static int currentScopeIdx;             /* The scope stack index. */
 static int currentTimelineOrder;        /* The current timeline order. */
 static classList *currentSupers;        /* The current super-class list. */
+static platformDef *currentPlatforms;   /* The current platforms list. */
+static platformDef *platformStack[MAX_NESTED_IF];   /* Stack of platforms. */
 static KwArgs defaultKwArgs;            /* The default keyword arguments support. */
 static int makeProtPublic;              /* Treat protected items as public. */
 static int parsingCSignature;           /* An explicit C/C++ signature is being parsed. */
@@ -61,8 +64,9 @@ static int parsingCSignature;           /* An explicit C/C++ signature is being 
 static const char *getPythonName(moduleDef *mod, optFlags *optflgs,
         const char *cname);
 static classDef *findClass(sipSpec *pt, ifaceFileType iftype,
-        apiVersionRangeDef *api_range, scopedNameDef *fqname);
-static classDef *findClassWithInterface(sipSpec *pt, ifaceFileDef *iff);
+        apiVersionRangeDef *api_range, scopedNameDef *fqname, int tmpl_arg);
+static classDef *findClassWithInterface(sipSpec *pt, ifaceFileDef *iff,
+        int tmpl_arg);
 static classDef *newClass(sipSpec *pt, ifaceFileType iftype,
         apiVersionRangeDef *api_range, scopedNameDef *snd,
         const char *virt_error_handler, typeHintDef *typehint_in,
@@ -71,24 +75,27 @@ static void finishClass(sipSpec *, moduleDef *, classDef *, optFlags *);
 static exceptionDef *findException(sipSpec *pt, scopedNameDef *fqname, int new);
 static mappedTypeDef *newMappedType(sipSpec *,argDef *, optFlags *);
 static enumDef *newEnum(sipSpec *pt, moduleDef *mod, mappedTypeDef *mt_scope,
-        char *name, optFlags *of, int flags);
+        char *name, optFlags *of, int flags, int isscoped);
 static void instantiateClassTemplate(sipSpec *pt, moduleDef *mod,
         classDef *scope, scopedNameDef *fqname, classTmplDef *tcd,
-        templateDef *td, const char *pyname);
-static void newTypedef(sipSpec *, moduleDef *, char *, argDef *, optFlags *);
+        templateDef *td, const char *pyname, int use_template_name,
+        docstringDef *docstring);
+static void newTypedef(sipSpec *, moduleDef *, char *, argDef *, optFlags *,
+        docstringDef *);
 static void newVar(sipSpec *pt, moduleDef *mod, char *name, int isstatic,
         argDef *type, optFlags *of, codeBlock *acode, codeBlock *gcode,
         codeBlock *scode, int section);
 static void newCtor(moduleDef *, char *, int, signatureDef *, optFlags *,
-        codeBlock *, throwArgs *, signatureDef *, int, codeBlock *);
-static void newFunction(sipSpec *, moduleDef *, classDef *, mappedTypeDef *,
-        int, int, int, int, int, char *, signatureDef *, int, int, optFlags *,
-        codeBlock *, codeBlock *, codeBlock *, throwArgs *, signatureDef *,
-        codeBlock *);
+                    codeBlock *, throwArgs *, signatureDef *, int,
+                    docstringDef *, codeBlock *);
+static void newFunction(sipSpec *, moduleDef *, classDef *, ifaceFileDef *,
+        mappedTypeDef *, int, int, int, int, int, char *, signatureDef *, int,
+        int, optFlags *, codeBlock *, codeBlock *, codeBlock *, throwArgs *,
+        signatureDef *, docstringDef *, int, codeBlock *);
 static optFlag *findOptFlag(optFlags *flgs, const char *name);
 static optFlag *getOptFlag(optFlags *flgs, const char *name, flagType ft);
 static memberDef *findFunction(sipSpec *, moduleDef *, classDef *,
-        mappedTypeDef *, const char *, int, int, int);
+        ifaceFileDef *, mappedTypeDef *, const char *, int, int, int);
 static void checkAttributes(sipSpec *, moduleDef *, classDef *,
         mappedTypeDef *, const char *, int);
 static void newModule(FILE *fp, const char *filename);
@@ -110,7 +117,8 @@ static qualDef *allocQualifier(moduleDef *, int, int, int, const char *,
         qualType);
 static void newImport(const char *filename);
 static int timePeriod(const char *lname, const char *uname);
-static int platOrFeature(char *,int);
+static int platOrFeature(char *name, int optnot);
+static void addPlatform(qualDef *qd);
 static int notSkipping(void);
 static void getHooks(optFlags *,char **,char **);
 static int getTransfer(optFlags *optflgs);
@@ -125,9 +133,9 @@ static const char *getTypeHintValue(optFlags *optflgs);
 static void getTypeHints(optFlags *optflgs, typeHintDef **in,
         typeHintDef **out);
 static int getNoTypeHint(optFlags *optflgs);
-static void templateSignature(signatureDef *sd, int result, classTmplDef *tcd,
-        templateDef *td, classDef *ncd, scopedNameDef *type_names,
-        scopedNameDef *type_values);
+static void templateSignature(signatureDef *sd, KwArgs kwargs, int result,
+        classTmplDef *tcd, templateDef *td, classDef *ncd,
+        scopedNameDef *type_names, scopedNameDef *type_values);
 static void templateType(argDef *ad, classTmplDef *tcd, templateDef *td,
         classDef *ncd, scopedNameDef *type_names, scopedNameDef *type_values);
 static int search_back(const char *end, const char *start, const char *target);
@@ -159,24 +167,24 @@ static void addTypedef(sipSpec *pt, typedefDef *tdd);
 static void addVariable(sipSpec *pt, varDef *vd);
 static void applyTypeFlags(moduleDef *mod, argDef *ad, optFlags *flags);
 static Format convertFormat(const char *format);
+static Signature convertSignature(const char *signature);
 static argType convertEncoding(const char *encoding);
 static apiVersionRangeDef *getAPIRange(optFlags *optflgs);
 static apiVersionRangeDef *convertAPIRange(moduleDef *mod, nameDef *name,
         int from, int to);
 static char *convertFeaturedString(char *fs);
-static scopedNameDef *text2scopePart(char *text);
 static KwArgs keywordArgs(moduleDef *mod, optFlags *optflgs, signatureDef *sd,
         int need_name);
 static char *strip(char *s);
 static int isEnabledFeature(const char *name);
 static void addProperty(sipSpec *pt, moduleDef *mod, classDef *cd,
         const char *name, const char *get, const char *set,
-        codeBlock *docstring);
+        docstringDef *docstring);
 static moduleDef *configureModule(sipSpec *pt, moduleDef *module,
-        const char *filename, const char *name, int version, int c_module,
-        KwArgs kwargs, int use_arg_names, int call_super_init,
+        const char *filename, const char *name, int c_module, KwArgs kwargs,
+        int use_arg_names, int use_limited_api, int call_super_init,
         int all_raise_py_exc, const char *def_error_handler,
-        codeBlock *docstring, const char *nameshort);
+        docstringDef *docstring, const char *nameshort);
 static void addAutoPyName(moduleDef *mod, const char *remove_leading);
 static KwArgs convertKwArgs(const char *kwargs);
 static void checkAnnos(optFlags *annos, const char *valid[]);
@@ -188,6 +196,7 @@ static void add_new_deref(argDef *new, argDef *orig, int isconst);
 static void add_derefs(argDef *dst, argDef *src);
 static int isBackstop(qualDef *qd);
 static void checkEllipsis(signatureDef *sd);
+static scopedNameDef *fullyQualifiedName(scopedNameDef *snd);
 %}
 
 %union {
@@ -200,6 +209,7 @@ static void checkEllipsis(signatureDef *sd);
     signatureDef    *optsignature;
     throwArgs       *throwlist;
     codeBlock       *codeb;
+    docstringDef    *docstr;
     valueDef        value;
     valueDef        *valp;
     optFlags        optflags;
@@ -213,10 +223,12 @@ static void checkEllipsis(signatureDef *sd);
     autoPyNameCfg   autopyname;
     compModuleCfg   compmodule;
     consModuleCfg   consmodule;
-    defDocstringCfg defdocstring;
+    defDocstringFmtCfg  defdocstringfmt;
+    defDocstringSigCfg  defdocstringsig;
     defEncodingCfg  defencoding;
     defMetatypeCfg  defmetatype;
     defSupertypeCfg defsupertype;
+    hiddenNsCfg     hiddenns;
     exceptionCfg    exception;
     docstringCfg    docstring;
     extractCfg      extract;
@@ -234,7 +246,8 @@ static void checkEllipsis(signatureDef *sd);
 
 %token          TK_API
 %token          TK_AUTOPYNAME
-%token          TK_DEFDOCSTRING
+%token          TK_DEFDOCSTRFMT
+%token          TK_DEFDOCSTRSIG
 %token          TK_DEFENCODING
 %token          TK_PLUGIN
 %token          TK_VIRTERRORHANDLER
@@ -277,6 +290,7 @@ static void checkEllipsis(signatureDef *sd);
 %token          TK_PICKLECODE
 %token          TK_VIRTUALCALLCODE
 %token          TK_METHODCODE
+%token          TK_PREMETHODCODE
 %token          TK_INSTANCECODE
 %token          TK_FROMTYPE
 %token          TK_TOTYPE
@@ -333,6 +347,7 @@ static void checkEllipsis(signatureDef *sd);
 %token          TK_SIPSLOTCON
 %token          TK_SIPSLOTDIS
 %token          TK_SIPSSIZET
+%token          TK_SIZET
 %token <number> TK_NUMBER_VALUE
 %token <real>   TK_REAL_VALUE
 %token          TK_TYPEDEF
@@ -350,13 +365,14 @@ static void checkEllipsis(signatureDef *sd);
 %token          TK_QOBJECT
 %token          TK_EXCEPTION
 %token          TK_RAISECODE
-%token          TK_VIRTERRORCODE
 %token          TK_EXPLICIT
 %token          TK_TEMPLATE
+%token          TK_FINAL
 %token          TK_ELLIPSIS
 %token          TK_DEFMETATYPE
 %token          TK_DEFSUPERTYPE
 %token          TK_PROPERTY
+%token          TK_HIDE_NS
 
 %token          TK_FORMAT
 %token          TK_GET
@@ -373,6 +389,7 @@ static void checkEllipsis(signatureDef *sd);
 %token          TK_TIMESTAMP
 %token          TK_TYPE
 %token          TK_USEARGNAMES
+%token          TK_USELIMITEDAPI
 %token          TK_ALLRAISEPYEXC
 %token          TK_CALLSUPERINIT
 %token          TK_DEFERRORHANDLER
@@ -395,7 +412,7 @@ static void checkEllipsis(signatureDef *sd);
 %type <number>          optslot
 %type <number>          optref
 %type <number>          optconst
-%type <number>          optvirtual
+%type <number>          optfinal
 %type <number>          optabstract
 %type <number>          optnumber
 %type <value>           simplevalue
@@ -423,10 +440,11 @@ static void checkEllipsis(signatureDef *sd);
 %type <codeb>           virtualcatchercode
 %type <codeb>           virtualcallcode
 %type <codeb>           methodcode
+%type <codeb>           premethodcode
 %type <codeb>           instancecode
 %type <codeb>           raisecode
-%type <codeb>           docstring
-%type <codeb>           optdocstring
+%type <docstr>          optdocstring
+%type <docstr>          docstring
 %type <text>            operatorname
 %type <text>            optfilename
 %type <text>            optname
@@ -440,12 +458,14 @@ static void checkEllipsis(signatureDef *sd);
 %type <qchar>           binop
 %type <scpvalp>         scopepart
 %type <scpvalp>         scopedname
+%type <scpvalp>         scopednamehead
 %type <scpvalp>         optcast
 %type <fcall>           exprlist
 %type <boolean>         qualifiers
 %type <boolean>         oredqualifiers
 %type <boolean>         optclassbody
 %type <boolean>         bool_value
+%type <boolean>         optenumkey
 %type <exceptionbase>   baseexception
 %type <klass>           class
 %type <token>           class_access
@@ -472,9 +492,13 @@ static void checkEllipsis(signatureDef *sd);
 %type <consmodule>      consmodule_body_directives
 %type <consmodule>      consmodule_body_directive
 
-%type <defdocstring>    defdocstring_args
-%type <defdocstring>    defdocstring_arg_list
-%type <defdocstring>    defdocstring_arg
+%type <defdocstringfmt> defdocstringfmt_args
+%type <defdocstringfmt> defdocstringfmt_arg_list
+%type <defdocstringfmt> defdocstringfmt_arg
+
+%type <defdocstringsig> defdocstringsig_args
+%type <defdocstringsig> defdocstringsig_arg_list
+%type <defdocstringsig> defdocstringsig_arg
 
 %type <defencoding>     defencoding_args
 %type <defencoding>     defencoding_arg_list
@@ -487,6 +511,10 @@ static void checkEllipsis(signatureDef *sd);
 %type <defsupertype>    defsupertype_args
 %type <defsupertype>    defsupertype_arg_list
 %type <defsupertype>    defsupertype_arg
+
+%type <hiddenns>        hiddenns_args
+%type <hiddenns>        hiddenns_arg_list
+%type <hiddenns>        hiddenns_arg
 
 %type <exception>       exception_body
 %type <exception>       exception_body_directives
@@ -580,10 +608,12 @@ modstatement:   module
     |   platforms
     |   feature
     |   license
-    |   defdocstring
+    |   defdocstringfmt
+    |   defdocstringsig
     |   defencoding
     |   defmetatype
     |   defsupertype
+    |   hiddenns
     |   exphdrcode
     |   modhdrcode
     |   modcode
@@ -629,24 +659,24 @@ nsstatement:    ifstart
         }
     ;
 
-defdocstring:    TK_DEFDOCSTRING defdocstring_args {
+defdocstringfmt: TK_DEFDOCSTRFMT defdocstringfmt_args {
             if (notSkipping())
-                currentModule->defdocstring = convertFormat($2.name);
+                currentModule->defdocstringfmt = convertFormat($2.name);
         }
     ;
 
-defdocstring_args:   TK_STRING_VALUE {
+defdocstringfmt_args:   TK_STRING_VALUE {
             resetLexerState();
 
             $$.name = $1;
         }
-    |   '(' defdocstring_arg_list ')' {
+    |   '(' defdocstringfmt_arg_list ')' {
             $$ = $2;
         }
     ;
 
-defdocstring_arg_list:   defdocstring_arg
-    |   defdocstring_arg_list ',' defdocstring_arg {
+defdocstringfmt_arg_list:   defdocstringfmt_arg
+    |   defdocstringfmt_arg_list ',' defdocstringfmt_arg {
             $$ = $1;
 
             switch ($3.token)
@@ -656,7 +686,41 @@ defdocstring_arg_list:   defdocstring_arg
         }
     ;
 
-defdocstring_arg:    TK_NAME '=' TK_STRING_VALUE {
+defdocstringfmt_arg:    TK_NAME '=' TK_STRING_VALUE {
+            $$.token = TK_NAME;
+
+            $$.name = $3;
+        }
+    ;
+
+defdocstringsig: TK_DEFDOCSTRSIG defdocstringsig_args {
+            if (notSkipping())
+                currentModule->defdocstringsig = convertSignature($2.name);
+        }
+    ;
+
+defdocstringsig_args:   TK_STRING_VALUE {
+            resetLexerState();
+
+            $$.name = $1;
+        }
+    |   '(' defdocstringsig_arg_list ')' {
+            $$ = $2;
+        }
+    ;
+
+defdocstringsig_arg_list:   defdocstringsig_arg
+    |   defdocstringsig_arg_list ',' defdocstringsig_arg {
+            $$ = $1;
+
+            switch ($3.token)
+            {
+            case TK_NAME: $$.name = $3.name; break;
+            }
+        }
+    ;
+
+defdocstringsig_arg:    TK_NAME '=' TK_STRING_VALUE {
             $$.token = TK_NAME;
 
             $$.name = $3;
@@ -701,7 +765,10 @@ defencoding_arg:    TK_NAME '=' TK_STRING_VALUE {
     ;
 
 plugin:     TK_PLUGIN plugin_args {
-            /* Note that %Plugin is internal in SIP v4. */
+            /*
+             * Note that %Plugin is internal in SIP v4.  The current thinking
+             * is that it won't be needed for SIP v5.
+             */
 
             if (notSkipping())
                 appendString(&currentSpec->plugins, $2.name);
@@ -757,7 +824,7 @@ virterrorhandler:   TK_VIRTERRORHANDLER veh_args codeblock {
                 veh->name = $2.name;
                 appendCodeBlock(&veh->code, $3);
                 veh->mod = currentModule;
-                veh->index = currentModule->nrvirterrorhandlers++;
+                veh->index = -1;
                 veh->next = NULL;
 
                 *tailp = veh;
@@ -901,9 +968,6 @@ exception:  TK_EXCEPTION scopedname baseexception optflags exception_body {
 
                 if (getOptFlag(&$4, "Default", bool_flag) != NULL)
                     currentModule->defexception = xd;
-
-                if (xd->bibase != NULL || xd->base != NULL)
-                    xd->exceptionnr = currentModule->nrexceptions++;
             }
         }
     ;
@@ -1138,9 +1202,11 @@ mappedtypetmpl: template TK_MAPPEDTYPE basetype optflags {
                 if ($3.atype != template_type)
                     yyerror("%MappedType template must map a template type");
 
+                $3.u.td->fqname  = fullyQualifiedName($3.u.td->fqname);
+
                 /* Check a template hasn't already been provided. */
                 for (mtt = currentSpec->mappedtypetemplates; mtt != NULL; mtt = mtt->next)
-                    if (compareScopedNames(mtt->mt->type.u.td->fqname, $3.u.td->fqname) == 0 && sameTemplateSignature(&mtt->mt->type.u.td->types, &$3.u.td->types, TRUE))
+                    if (compareScopedNames(mtt->mt->type.u.td->fqname, $3.u.td->fqname ) == 0 && sameTemplateSignature(&mtt->mt->type.u.td->types, &$3.u.td->types, TRUE))
                         yyerror("%MappedType template for this type has already been defined");
 
                 $3.nrderefs = 0;
@@ -1224,16 +1290,17 @@ mtline: ifstart
     |   mtfunction
     ;
 
-mtfunction: TK_STATIC cpptype TK_NAME_VALUE '(' arglist ')' optconst optexceptions optflags optsig ';' optdocstring methodcode {
+mtfunction: TK_STATIC cpptype TK_NAME_VALUE '(' arglist ')' optconst optexceptions optflags optsig ';' optdocstring premethodcode methodcode {
             if (notSkipping())
             {
                 applyTypeFlags(currentModule, &$2, &$9);
 
                 $5.result = $2;
 
-                newFunction(currentSpec, currentModule, NULL,
+                newFunction(currentSpec, currentModule, NULL, NULL,
                         currentMappedType, 0, TRUE, FALSE, FALSE, FALSE, $3,
-                        &$5, $7, FALSE, &$9, $13, NULL, NULL, $8, $10, $12);
+                        &$5, $7, FALSE, &$9, $14, NULL, NULL, $8, $10, $12,
+                        FALSE, $13);
             }
         }
     ;
@@ -1392,30 +1459,36 @@ qualifiername:  TK_NAME_VALUE {
         }
     ;
 
-ifstart:    TK_IF '(' qualifiers ')' {
-            if (skipStackPtr >= MAX_NESTED_IF)
+ifstart:    TK_IF '(' {
+            currentPlatforms = NULL;
+        } qualifiers ')' {
+            if (stackPtr >= MAX_NESTED_IF)
                 yyerror("Internal error: increase the value of MAX_NESTED_IF");
 
             /* Nested %Ifs are implicit logical ands. */
 
-            if (skipStackPtr > 0)
-                $3 = ($3 && skipStack[skipStackPtr - 1]);
+            if (stackPtr > 0)
+                $4 = ($4 && skipStack[stackPtr - 1]);
 
-            skipStack[skipStackPtr++] = $3;
+            skipStack[stackPtr] = $4;
+
+            platformStack[stackPtr] = currentPlatforms;
+
+            ++stackPtr;
         }
     ;
 
 oredqualifiers: TK_NAME_VALUE {
-            $$ = platOrFeature($1,FALSE);
+            $$ = platOrFeature($1, FALSE);
         }
     |   '!' TK_NAME_VALUE {
-            $$ = platOrFeature($2,TRUE);
+            $$ = platOrFeature($2, TRUE);
         }
     |   oredqualifiers TK_LOGICAL_OR TK_NAME_VALUE {
-            $$ = (platOrFeature($3,FALSE) || $1);
+            $$ = (platOrFeature($3, FALSE) || $1);
         }
     |   oredqualifiers TK_LOGICAL_OR '!' TK_NAME_VALUE {
-            $$ = (platOrFeature($4,TRUE) || $1);
+            $$ = (platOrFeature($4, TRUE) || $1);
         }
     ;
 
@@ -1426,8 +1499,10 @@ qualifiers: oredqualifiers
     ;
 
 ifend:      TK_END {
-            if (skipStackPtr-- <= 0)
+            if (stackPtr-- <= 0)
                 yyerror("Too many %End directives");
+
+            currentPlatforms = (stackPtr == 0 ? NULL : platformStack[stackPtr - 1]);
         }
     ;
 
@@ -1613,6 +1688,46 @@ defsupertype_arg:   TK_NAME '=' dottedname {
         }
     ;
 
+hiddenns:   TK_HIDE_NS hiddenns_args {
+            if (notSkipping())
+            {
+                classDef *ns;
+
+                ns = newClass(currentSpec, namespace_iface, NULL,
+                        fullyQualifiedName($2.name), NULL, NULL, NULL, NULL);
+                setHiddenNamespace(ns);
+            }
+        }
+    ;
+
+hiddenns_args:  scopedname {
+            resetLexerState();
+
+            $$.name = $1;
+        }
+    |   '(' hiddenns_arg_list ')' {
+            $$ = $2;
+        }
+    ;
+
+hiddenns_arg_list:  hiddenns_arg
+    |   hiddenns_arg_list ',' hiddenns_arg {
+            $$ = $1;
+
+            switch ($3.token)
+            {
+            case TK_NAME: $$.name = $3.name; break;
+            }
+        }
+    ;
+
+hiddenns_arg:   TK_NAME '=' scopedname {
+            $$.token = TK_NAME;
+
+            $$.name = $3;
+        }
+    ;
+
 consmodule: TK_CONSMODULE consmodule_args consmodule_body {
             deprecated("%ConsolidatedModule is deprecated and will not be supported by SIP v5");
 
@@ -1626,7 +1741,7 @@ consmodule: TK_CONSMODULE consmodule_args consmodule_body {
                     yyerror("%ConsolidatedModule must appear before any %Module or %CModule directive");
 
                 setModuleName(currentSpec, currentModule, $2.name);
-                appendCodeBlock(&currentModule->docstring, $3.docstring);
+                currentModule->docstring = $3.docstring;
 
                 setIsConsolidated(currentModule);
             }
@@ -1712,7 +1827,7 @@ compmodule: TK_COMPOMODULE compmodule_args compmodule_body {
                     yyerror("%CompositeModule must appear before any %Module directive");
 
                 setModuleName(currentSpec, currentModule, $2.name);
-                appendCodeBlock(&currentModule->docstring, $3.docstring);
+                currentModule->docstring = $3.docstring;
 
                 setIsComposite(currentModule);
             }
@@ -1793,8 +1908,8 @@ module: TK_MODULE module_args module_body {
 
             if (notSkipping())
                 currentModule = configureModule(currentSpec, currentModule,
-                        currentContext.filename, $2.name, $2.version,
-                        $2.c_module, $2.kwargs, $2.use_arg_names,
+                        currentContext.filename, $2.name, $2.c_module,
+                        $2.kwargs, $2.use_arg_names, $2.use_limited_api,
                         $2.call_super_init, $2.all_raise_py_exc,
                         $2.def_error_handler, $3.docstring, $2.nameshort);
         }
@@ -1803,8 +1918,8 @@ module: TK_MODULE module_args module_body {
 
             if (notSkipping())
                 currentModule = configureModule(currentSpec, currentModule,
-                        currentContext.filename, $2, $3, TRUE, defaultKwArgs,
-                        FALSE, -1, FALSE, NULL, NULL, NULL);
+                        currentContext.filename, $2, TRUE, defaultKwArgs,
+                        FALSE, FALSE, -1, FALSE, NULL, NULL, NULL);
         }
     ;
 
@@ -1817,10 +1932,10 @@ module_args:    dottedname {resetLexerState();} optnumber {
             $$.name = $1;
             $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
             $$.def_error_handler = NULL;
-            $$.version = $3;
         }
     |   '(' module_arg_list ')' {
             $$ = $2;
@@ -1838,10 +1953,10 @@ module_arg_list:    module_arg
             case TK_NAME: $$.name = $3.name; break;
             case TK_NAMESHORT: $$.nameshort = $3.nameshort; break;
             case TK_USEARGNAMES: $$.use_arg_names = $3.use_arg_names; break;
+            case TK_USELIMITEDAPI: $$.use_limited_api = $3.use_limited_api; break;
             case TK_ALLRAISEPYEXC: $$.all_raise_py_exc = $3.all_raise_py_exc; break;
             case TK_CALLSUPERINIT: $$.call_super_init = $3.call_super_init; break;
             case TK_DEFERRORHANDLER: $$.def_error_handler = $3.def_error_handler; break;
-            case TK_VERSION: $$.version = $3.version; break;
             }
         }
     ;
@@ -1854,10 +1969,10 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.name = NULL;
             $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
             $$.def_error_handler = NULL;
-            $$.version = -1;
         }
     |   TK_LANGUAGE '=' TK_STRING_VALUE {
             $$.token = TK_LANGUAGE;
@@ -1873,10 +1988,10 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.name = NULL;
             $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
             $$.def_error_handler = NULL;
-            $$.version = -1;
         }
     |   TK_NAME '=' dottedname {
             $$.token = TK_NAME;
@@ -1886,10 +2001,10 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.name = $3;
             $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
             $$.def_error_handler = NULL;
-            $$.version = -1;
         }
     |   TK_NAMESHORT '=' dottedname {
             $$.token = TK_NAMESHORT;
@@ -1899,10 +2014,10 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.name = NULL;
             $$.nameshort = $3;
             $$.use_arg_names = FALSE;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
             $$.def_error_handler = NULL;
-            $$.version = -1;
         }
     |   TK_USEARGNAMES '=' bool_value {
             $$.token = TK_USEARGNAMES;
@@ -1912,10 +2027,22 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.name = NULL;
             $$.nameshort = NULL;
             $$.use_arg_names = $3;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
             $$.def_error_handler = NULL;
-            $$.version = -1;
+        }
+    |   TK_USELIMITEDAPI '=' bool_value {
+            $$.token = TK_USELIMITEDAPI;
+
+            $$.c_module = FALSE;
+            $$.kwargs = defaultKwArgs;
+            $$.name = NULL;
+            $$.use_arg_names = FALSE;
+            $$.use_limited_api = $3;
+            $$.all_raise_py_exc = FALSE;
+            $$.call_super_init = -1;
+            $$.def_error_handler = NULL;
         }
     |   TK_ALLRAISEPYEXC '=' bool_value {
             $$.token = TK_ALLRAISEPYEXC;
@@ -1925,10 +2052,10 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.name = NULL;
             $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = $3;
             $$.call_super_init = -1;
             $$.def_error_handler = NULL;
-            $$.version = -1;
         }
     |   TK_CALLSUPERINIT '=' bool_value {
             $$.token = TK_CALLSUPERINIT;
@@ -1938,10 +2065,10 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.name = NULL;
             $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = $3;
             $$.def_error_handler = NULL;
-            $$.version = -1;
         }
     |   TK_DEFERRORHANDLER '=' TK_NAME_VALUE {
             $$.token = TK_DEFERRORHANDLER;
@@ -1951,12 +2078,14 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.name = NULL;
             $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
             $$.def_error_handler = $3;
-            $$.version = -1;
         }
     |   TK_VERSION '=' TK_NUMBER_VALUE {
+            deprecated("%Module version numbers are deprecated and ignored");
+
             if ($3 < 0)
                 yyerror("%Module 'version' argument cannot be negative");
 
@@ -1967,10 +2096,10 @@ module_arg: TK_KWARGS '=' TK_STRING_VALUE {
             $$.name = NULL;
             $$.nameshort = NULL;
             $$.use_arg_names = FALSE;
+            $$.use_limited_api = FALSE;
             $$.all_raise_py_exc = FALSE;
             $$.call_super_init = -1;
             $$.def_error_handler = NULL;
-            $$.version = $3;
         }
     ;
 
@@ -2335,7 +2464,11 @@ autopyname_arg: TK_REMOVELEADING '=' TK_STRING_VALUE {
     ;
 
 docstring:  TK_DOCSTRING docstring_args codeblock {
-            $$ = $3;
+            $$ = sipMalloc(sizeof(docstringDef));
+
+            $$->signature = $2.signature;
+            $$->text = $3->frag;
+            free($3);
 
             /* Format the docstring. */
             if ($2.format == deindented)
@@ -2349,7 +2482,7 @@ docstring:  TK_DOCSTRING docstring_args codeblock {
                 indent = 0;
                 skipping = FALSE;
 
-                for (cp = $$->frag; *cp != '\0'; ++cp)
+                for (cp = $$->text; *cp != '\0'; ++cp)
                 {
                     if (skipping)
                     {
@@ -2384,7 +2517,7 @@ docstring:  TK_DOCSTRING docstring_args codeblock {
                 /*
                  * Go through the text again removing the common indentation.
                  */
-                cp = dp = $$->frag;
+                cp = dp = $$->text;
 
                 while (*cp != '\0')
                 {
@@ -2415,12 +2548,14 @@ docstring:  TK_DOCSTRING docstring_args codeblock {
     ;
 
 docstring_args: {
-            $$.format = currentModule->defdocstring;
+            $$.format = currentModule->defdocstringfmt;
+            $$.signature = currentModule->defdocstringsig;
         }
     |   TK_STRING_VALUE {
             resetLexerState();
 
             $$.format = convertFormat($1);
+            $$.signature = currentModule->defdocstringsig;
         }
     |   '(' docstring_arg_list ')' {
             $$ = $2;
@@ -2434,6 +2569,7 @@ docstring_arg_list: docstring_arg
             switch ($3.token)
             {
             case TK_FORMAT: $$.format = $3.format; break;
+            case TK_SIGNATURE: $$.signature = $3.signature; break;
             }
         }
     ;
@@ -2442,6 +2578,13 @@ docstring_arg:  TK_FORMAT '=' TK_STRING_VALUE {
             $$.token = TK_FORMAT;
 
             $$.format = convertFormat($3);
+            $$.signature = currentModule->defdocstringsig;
+        }
+    |   TK_SIGNATURE '=' TK_STRING_VALUE {
+            $$.token = TK_SIGNATURE;
+
+            $$.format = currentModule->defdocstringfmt;
+            $$.signature = convertSignature($3);
         }
     ;
 
@@ -2519,7 +2662,7 @@ codelines:  TK_CODELINE
         }
     ;
 
-enum:       TK_ENUM optname optflags {
+enum:       TK_ENUM optenumkey optname optflags {
             if (notSkipping())
             {
                 const char *annos[] = {
@@ -2529,15 +2672,29 @@ enum:       TK_ENUM optname optflags {
                     NULL
                 };
 
-                checkAnnos(&$3, annos);
+                checkAnnos(&$4, annos);
 
                 if (sectionFlags != 0 && (sectionFlags & ~(SECT_IS_PUBLIC | SECT_IS_PROT)) != 0)
                     yyerror("Class enums must be in the public or protected sections");
 
+                if (currentSpec->genc && $2)
+                    yyerror("Scoped enums not allowed in a C module");
+
                 currentEnum = newEnum(currentSpec, currentModule,
-                        currentMappedType, $2, &$3, sectionFlags);
+                        currentMappedType, $3, &$4, sectionFlags, $2);
             }
         } '{' optenumbody '}' ';'
+    ;
+
+optenumkey: {
+            $$ = FALSE;
+        }
+    |   TK_CLASS {
+            $$ = TRUE;
+        }
+    |   TK_STRUCT {
+            $$ = TRUE;
+        }
     ;
 
 optfilename:    {
@@ -2587,10 +2744,16 @@ enumline:   ifstart
                 emd->cname = $1;
                 emd->no_typehint = getNoTypeHint(&$3);
                 emd->ed = currentEnum;
+                emd->platforms = currentPlatforms;
                 emd->next = NULL;
 
-                checkAttributes(currentSpec, currentModule, emd->ed->ecd,
-                        emd->ed->emtd, emd->pyname->text, FALSE);
+                /*
+                 * Note that we don't check that members of scoped enums are
+                 * unique.
+                 */
+                if (!isScopedEnum(currentEnum))
+                    checkAttributes(currentSpec, currentModule, emd->ed->ecd,
+                            emd->ed->emtd, emd->pyname->text, FALSE);
 
                 /* Append to preserve the order. */
                 for (tail = &currentEnum->members; *tail != NULL; tail = &(*tail)->next)
@@ -2705,12 +2868,21 @@ optcast:    {
         }
     ;
 
-scopedname: scopepart
-    |   scopedname TK_SCOPE scopepart {
-            if (currentSpec -> genc)
+scopedname: TK_SCOPE scopednamehead {
+            if (currentSpec->genc)
                 yyerror("Scoped names are not allowed in a C module");
 
-            appendScopedName(&$1,$3);
+            $$ = scopeScopedName(NULL, $2);
+        }
+    |       scopednamehead
+    ;
+
+scopednamehead: scopepart
+    |   scopednamehead TK_SCOPE scopepart {
+            if (currentSpec->genc)
+                yyerror("Scoped names are not allowed in a C module");
+
+            appendScopedName(&$1, $3);
         }
     ;
 
@@ -2745,6 +2917,9 @@ simplevalue:    scopedname {
 
             $$.vtype = fcall_value;
             $$.u.fcd = fcd;
+        }
+    |   '{' '}' {
+            $$.vtype = empty_value;
         }
     |   TK_REAL_VALUE {
             $$.vtype = real_value;
@@ -2801,7 +2976,7 @@ exprlist:   {
         }
     ;
 
-typedef:    TK_TYPEDEF cpptype TK_NAME_VALUE optflags ';' {
+typedef:    TK_TYPEDEF cpptype TK_NAME_VALUE optflags ';' optdocstring {
             if (notSkipping())
             {
                 const char *annos[] = {
@@ -2820,10 +2995,10 @@ typedef:    TK_TYPEDEF cpptype TK_NAME_VALUE optflags ';' {
                 checkAnnos(&$4, annos);
 
                 applyTypeFlags(currentModule, &$2, &$4);
-                newTypedef(currentSpec, currentModule, $3, &$2, &$4);
+                newTypedef(currentSpec, currentModule, $3, &$2, &$4, $6);
             }
         }
-    |   TK_TYPEDEF cpptype '(' '*' TK_NAME_VALUE ')' '(' cpptypelist ')' optflags ';' {
+    |   TK_TYPEDEF cpptype '(' '*' TK_NAME_VALUE ')' '(' cpptypelist ')' optflags ';' optdocstring {
             if (notSkipping())
             {
                 const char *annos[] = {
@@ -2857,7 +3032,7 @@ typedef:    TK_TYPEDEF cpptype TK_NAME_VALUE optflags ';' {
                 ftype.nrderefs = 1;
                 ftype.u.sa = sig;
 
-                newTypedef(currentSpec, currentModule, $5, &ftype, &$10);
+                newTypedef(currentSpec, currentModule, $5, &ftype, &$10, $12);
             }
         }
     ;
@@ -2886,6 +3061,7 @@ struct:     TK_STRUCT scopedname {
                     "NoTypeHint",
                     "PyName",
                     "PyQtFlags",
+                    "PyQtFlagsEnums",
                     "PyQtInterface",
                     "PyQtNoQMetaObject",
                     "Supertype",
@@ -2965,6 +3141,7 @@ class:  TK_CLASS scopedname {
                     "NoDefaultCtors",
                     "PyName",
                     "PyQtFlags",
+                    "PyQtFlagsEnums",
                     "PyQtInterface",
                     "PyQtNoQMetaObject",
                     "Supertype",
@@ -3029,11 +3206,19 @@ superclass: class_access scopedname {
                     yyerror("Super-class list contains an invalid type");
 
                 /*
+                 * This is a bug because we should look in the local scope
+                 * rather than assume it is in the global scope.
+                 */
+                if (snd->name[0] != '\0')
+                    snd = scopeScopedName(NULL, snd);
+
+                /*
                  * Note that passing NULL as the API is a bug.  Instead we
                  * should pass the API of the sub-class being defined,
                  * otherwise we cannot create sub-classes of versioned classes.
                  */
-                super = findClass(currentSpec, class_iface, NULL, snd);
+                super = findClass(currentSpec, class_iface, NULL, snd,
+                        currentIsTemplate);
                 appendToClassList(&currentSupers, super);
             }
         }
@@ -3061,7 +3246,8 @@ optclassbody:   {
         }
     ;
 
-classbody:  classline
+classbody:
+    |   classline
     |   classbody classline
     ;
 
@@ -3070,13 +3256,21 @@ classline:  ifstart
     |   namespace
     |   struct
     |   class
+    |   classtmpl
     |   exception
     |   typedef
     |   enum
     |   property
     |   docstring {
             if (notSkipping())
-                appendCodeBlock(&currentScope()->docstring, $1);
+            {
+                classDef *scope = currentScope();
+
+                if (scope->docstring != NULL)
+                    yyerror("%Docstring already given for class");
+
+                scope->docstring = $1;
+            }
         }
     |   typecode {
             if (notSkipping())
@@ -3390,7 +3584,12 @@ optslot:    {
         }
     ;
 
-dtor:       optvirtual '~' TK_NAME_VALUE '(' ')' optexceptions optabstract optflags ';' methodcode virtualcatchercode {
+dtor:
+        TK_VIRTUAL {currentIsVirt = TRUE;} dtor_decl
+    |   dtor_decl
+    ;
+
+dtor_decl:  '~' TK_NAME_VALUE '(' ')' optexceptions optabstract optflags ';' premethodcode methodcode virtualcatchercode {
             /* Note that we allow non-virtual dtors in C modules. */
 
             if (notSkipping())
@@ -3403,20 +3602,22 @@ dtor:       optvirtual '~' TK_NAME_VALUE '(' ')' optexceptions optabstract optfl
 
                 classDef *cd = currentScope();
 
-                checkAnnos(&$8, annos);
+                checkAnnos(&$7, annos);
 
-                if (strcmp(classBaseName(cd),$3) != 0)
+                if (strcmp(classBaseName(cd),$2) != 0)
                     yyerror("Destructor doesn't have the same name as its class");
 
                 if (isDtor(cd))
                     yyerror("Destructor has already been defined");
 
-                if (currentSpec -> genc && $10 == NULL)
+                if (currentSpec -> genc && $9 == NULL)
                     yyerror("Destructor in C modules must include %MethodCode");
 
-                appendCodeBlock(&cd->dealloccode, $10);
+
+                appendCodeBlock(&cd->dealloccode, $9);  /* premethodcode */
+                appendCodeBlock(&cd->dealloccode, $10); /* methodcode */
                 appendCodeBlock(&cd->dtorcode, $11);
-                cd -> dtorexceptions = $6;
+                cd -> dtorexceptions = $5;
 
                 /*
                  * Note that we don't apply the protected/public hack to dtors
@@ -3424,9 +3625,9 @@ dtor:       optvirtual '~' TK_NAME_VALUE '(' ')' optexceptions optabstract optfl
                  */
                 cd->classflags |= sectionFlags;
 
-                if ($7)
+                if ($6)
                 {
-                    if (!$1)
+                    if (!currentIsVirt)
                         yyerror("Abstract destructor must be virtual");
 
                     setIsAbstractClass(cd);
@@ -3436,19 +3637,21 @@ dtor:       optvirtual '~' TK_NAME_VALUE '(' ')' optexceptions optabstract optfl
                  * The class has a shadow if we have a virtual dtor or some
                  * dtor code.
                  */
-                if ($1 || $11 != NULL)
+                if (currentIsVirt || $10 != NULL)
                 {
                     if (currentSpec -> genc)
                         yyerror("Virtual destructor or %VirtualCatcherCode not allowed in a C module");
 
-                    setHasShadow(cd);
+                    setNeedsShadow(cd);
                 }
 
-                if (getReleaseGIL(&$8))
+                if (getReleaseGIL(&$7))
                     setIsReleaseGILDtor(cd);
-                else if (getHoldGIL(&$8))
+                else if (getHoldGIL(&$7))
                     setIsHoldGILDtor(cd);
             }
+
+            currentIsVirt = FALSE;
         }
     ;
 
@@ -3456,7 +3659,7 @@ ctor:       TK_EXPLICIT {currentCtorIsExplicit = TRUE;} simplector
     |   simplector
     ;
 
-simplector: TK_NAME_VALUE '(' arglist ')' optexceptions optflags optctorsig ';' optdocstring methodcode {
+simplector: TK_NAME_VALUE '(' arglist ')' optexceptions optflags optctorsig ';' optdocstring premethodcode methodcode {
             /* Note that we allow ctors in C modules. */
 
             if (notSkipping())
@@ -3492,8 +3695,8 @@ simplector: TK_NAME_VALUE '(' arglist ')' optexceptions optflags optctorsig ';' 
                 if ((sectionFlags & (SECT_IS_PUBLIC | SECT_IS_PROT | SECT_IS_PRIVATE)) == 0)
                     yyerror("Constructor must be in the public, private or protected sections");
 
-                newCtor(currentModule, $1, sectionFlags, &$3, &$6, $10, $5, $7,
-                        currentCtorIsExplicit, $9);
+                newCtor(currentModule, $1, sectionFlags, &$3, &$6, $11, $5, $7,
+                        currentCtorIsExplicit, $9, $10);
             }
 
             free($1);
@@ -3531,31 +3734,23 @@ optsig: {
         }
     ;
 
-optvirtual: {
-            $$ = FALSE;
-        }
-    |   TK_VIRTUAL {
-            $$ = TRUE;
-        }
-    ;
-
-function:   cpptype TK_NAME_VALUE '(' arglist ')' optconst optexceptions optabstract optflags optsig ';' optdocstring methodcode virtualcatchercode virtualcallcode {
+function:   cpptype TK_NAME_VALUE '(' arglist ')' optconst optfinal optexceptions optabstract optflags optsig ';' optdocstring premethodcode methodcode virtualcatchercode virtualcallcode {
             if (notSkipping())
             {
-                applyTypeFlags(currentModule, &$1, &$9);
+                applyTypeFlags(currentModule, &$1, &$10);
 
                 $4.result = $1;
 
                 newFunction(currentSpec, currentModule, currentScope(), NULL,
-                        sectionFlags, currentIsStatic, currentIsSignal,
-                        currentIsSlot, currentOverIsVirt, $2, &$4, $6, $8, &$9,
-                        $13, $14, $15, $7, $10, $12);
+                        NULL, sectionFlags, currentIsStatic, currentIsSignal,
+                        currentIsSlot, currentIsVirt, $2, &$4, $6, $9, &$10,
+                        $15, $16, $17, $8, $11, $13, $7, $14);
             }
 
             currentIsStatic = FALSE;
             currentIsSignal = FALSE;
             currentIsSlot = FALSE;
-            currentOverIsVirt = FALSE;
+            currentIsVirt = FALSE;
         }
     |   cpptype TK_OPERATOR '=' '(' cpptype ')' ';' {
             /*
@@ -3575,21 +3770,29 @@ function:   cpptype TK_NAME_VALUE '(' arglist ')' optconst optexceptions optabst
             currentIsStatic = FALSE;
             currentIsSignal = FALSE;
             currentIsSlot = FALSE;
-            currentOverIsVirt = FALSE;
+            currentIsVirt = FALSE;
         }
-    |   cpptype TK_OPERATOR operatorname '(' arglist ')' optconst optexceptions optabstract optflags optsig ';' methodcode virtualcatchercode virtualcallcode {
+    |   cpptype TK_OPERATOR operatorname '(' arglist ')' optconst optfinal optexceptions optabstract optflags optsig ';' premethodcode methodcode virtualcatchercode virtualcallcode {
             if (notSkipping())
             {
                 classDef *cd = currentScope();
+                ifaceFileDef *ns_scope;
 
                 /*
                  * If the scope is a namespace then make sure the operator is
-                 * handled as a global.
+                 * handled as a global, but remember it's C++ scope..
                  */
                 if (cd != NULL && cd->iff->type == namespace_iface)
+                {
+                    ns_scope = cd->iff;
                     cd = NULL;
+                }
+                else
+                {
+                    ns_scope = NULL;
+                }
 
-                applyTypeFlags(currentModule, &$1, &$10);
+                applyTypeFlags(currentModule, &$1, &$11);
 
                 /* Handle the unary '+' and '-' operators. */
                 if ((cd != NULL && $5.nrArgs == 0) || (cd == NULL && $5.nrArgs == 1))
@@ -3602,18 +3805,18 @@ function:   cpptype TK_NAME_VALUE '(' arglist ')' optconst optexceptions optabst
 
                 $5.result = $1;
 
-                newFunction(currentSpec, currentModule, cd, NULL,
+                newFunction(currentSpec, currentModule, cd, ns_scope, NULL,
                         sectionFlags, currentIsStatic, currentIsSignal,
-                        currentIsSlot, currentOverIsVirt, $3, &$5, $7, $9,
-                        &$10, $13, $14, $15, $8, $11, NULL);
+                        currentIsSlot, currentIsVirt, $3, &$5, $7, $10, &$11,
+                        $15, $16, $17, $9, $12, NULL, $8, $14);
             }
 
             currentIsStatic = FALSE;
             currentIsSignal = FALSE;
             currentIsSlot = FALSE;
-            currentOverIsVirt = FALSE;
+            currentIsVirt = FALSE;
         }
-    |   TK_OPERATOR cpptype '(' arglist ')' optconst optexceptions optabstract optflags optsig ';' methodcode virtualcatchercode virtualcallcode {
+    |   TK_OPERATOR cpptype '(' arglist ')' optconst optfinal optexceptions optabstract optflags optsig ';' premethodcode methodcode virtualcatchercode virtualcallcode {
             if (notSkipping())
             {
                 char *sname;
@@ -3622,7 +3825,7 @@ function:   cpptype TK_NAME_VALUE '(' arglist ')' optconst optexceptions optabst
                 if (scope == NULL || $4.nrArgs != 0)
                     yyerror("Operator casts must be specified in a class and have no arguments");
 
-                applyTypeFlags(currentModule, &$2, &$9);
+                applyTypeFlags(currentModule, &$2, &$10);
 
                 switch ($2.atype)
                 {
@@ -3665,10 +3868,10 @@ function:   cpptype TK_NAME_VALUE '(' arglist ')' optconst optexceptions optabst
                 {
                     $4.result = $2;
 
-                    newFunction(currentSpec, currentModule, scope, NULL,
+                    newFunction(currentSpec, currentModule, scope, NULL, NULL,
                             sectionFlags, currentIsStatic, currentIsSignal,
-                            currentIsSlot, currentOverIsVirt, sname, &$4, $6,
-                            $8, &$9, $12, $13, $14, $7, $10, NULL);
+                            currentIsSlot, currentIsVirt, sname, &$4, $6, $9,
+                            &$10, $14, $15, $16, $8, $11, NULL, $7, $13);
                 }
                 else
                 {
@@ -3690,7 +3893,7 @@ function:   cpptype TK_NAME_VALUE '(' arglist ')' optconst optexceptions optabst
             currentIsStatic = FALSE;
             currentIsSignal = FALSE;
             currentIsSlot = FALSE;
-            currentOverIsVirt = FALSE;
+            currentIsVirt = FALSE;
         }
     ;
 
@@ -3729,6 +3932,14 @@ optconst:   {
             $$ = FALSE;
         }
     |   TK_CONST {
+            $$ = TRUE;
+        }
+    ;
+
+optfinal:   {
+            $$ = FALSE;
+        }
+    |   TK_FINAL {
             $$ = TRUE;
         }
     ;
@@ -3828,6 +4039,14 @@ methodcode: {
             $$ = NULL;
         }
     |   TK_METHODCODE codeblock {
+            $$ = $2;
+        }
+    ;
+
+premethodcode: {
+            $$ = NULL;
+        }
+    |   TK_PREMETHODCODE codeblock {
             $$ = $2;
         }
     ;
@@ -4058,7 +4277,7 @@ varmem:
     ;
 
 member:
-        TK_VIRTUAL {currentOverIsVirt = TRUE;} function
+        TK_VIRTUAL {currentIsVirt = TRUE;} function
     |   function
     ;
 
@@ -4230,6 +4449,7 @@ argtype:    cpptype optname optflags {
                 "Out",
                 "PyInt",
                 "ResultSize",
+                "ScopesStripped",
                 "Transfer",
                 "TransferBack",
                 "TransferThis",
@@ -4240,12 +4460,18 @@ argtype:    cpptype optname optflags {
                 NULL
             };
 
+            optFlag *of;
+
             checkAnnos(&$3, annos);
 
             $$ = $1;
             $$.name = cacheName(currentSpec, $2);
 
             handleKeepReference(&$3, &$$, currentModule);
+
+            if ((of = getOptFlag(&$3, "ScopesStripped", opt_integer_flag)) != NULL)
+                if (($$.scopes_stripped = of->fvalue.ival) <= 0)
+                    yyerror("/ScopesStripped/ must be greater than 0");
 
             if (getAllowNone(&$3))
                 $$.argflags |= ARG_ALLOW_NONE;
@@ -4476,6 +4702,10 @@ basetype:   scopedname {
             memset(&$$, 0, sizeof (argDef));
             $$.atype = ssize_type;
         }
+    |   TK_SIZET {
+            memset(&$$, 0, sizeof (argDef));
+            $$.atype = size_type;
+        }
     |   TK_ELLIPSIS {
             memset(&$$, 0, sizeof (argDef));
             $$.atype = ellipsis_type;
@@ -4550,8 +4780,9 @@ exceptionlist:  {
 /*
  * Parse the specification.
  */
-void parse(sipSpec *spec, FILE *fp, char *filename, stringList *tsl,
-        stringList *bsl, stringList *xfl, KwArgs kwArgs, int protHack)
+void parse(sipSpec *spec, FILE *fp, char *filename, int strict,
+        stringList *tsl, stringList *bsl, stringList *xfl, KwArgs kwArgs,
+        int protHack)
 {
     classTmplDef *tcd;
 
@@ -4561,19 +4792,21 @@ void parse(sipSpec *spec, FILE *fp, char *filename, stringList *tsl,
     spec->genc = -1;
 
     currentSpec = spec;
+    strictParse = strict;
     backstops = bsl;
     neededQualifiers = tsl;
     excludedQualifiers = xfl;
     currentModule = NULL;
     currentMappedType = NULL;
-    currentOverIsVirt = FALSE;
+    currentIsVirt = FALSE;
     currentCtorIsExplicit = FALSE;
     currentIsStatic = FALSE;
     currentIsSignal = FALSE;
     currentIsSlot = FALSE;
     currentIsTemplate = FALSE;
     previousFile = NULL;
-    skipStackPtr = 0;
+    stackPtr = 0;
+    currentPlatforms = NULL;
     currentScopeIdx = 0;
     sectionFlags = 0;
     defaultKwArgs = kwArgs;
@@ -4680,10 +4913,8 @@ static moduleDef *allocModule()
 
     newmod = sipMalloc(sizeof (moduleDef));
 
-    newmod->version = -1;
-    newmod->defdocstring = raw;
+    newmod->defdocstringfmt = raw;
     newmod->encoding = no_type;
-    newmod->nrvirthandlers = -1;
     newmod->next_key = -1;
 
     /*
@@ -4708,7 +4939,7 @@ static void parseFile(FILE *fp, const char *name, moduleDef *prevmod,
     parserContext pc;
 
     pc.filename = name;
-    pc.ifdepth = skipStackPtr;
+    pc.ifdepth = stackPtr;
     pc.prevmod = prevmod;
 
     if (setInputFile(fp, &pc, optional))
@@ -4830,6 +5061,12 @@ ifaceFileDef *findIfaceFile(sipSpec *pt, moduleDef *mod, scopedNameDef *fqname,
         iff->first_alt = iff;
     }
 
+    /*
+     * Note that we assume that the type (ie. class vs. mapped type vs.
+     * exception) will be the same across all platforms.
+     */
+    iff->platforms = currentPlatforms;
+
     iff->type = iftype;
     iff->ifacenr = -1;
     iff->fqcname = fqname;
@@ -4849,25 +5086,36 @@ ifaceFileDef *findIfaceFile(sipSpec *pt, moduleDef *mod, scopedNameDef *fqname,
  * Find a class definition in a parse tree.
  */
 static classDef *findClass(sipSpec *pt, ifaceFileType iftype,
-        apiVersionRangeDef *api_range, scopedNameDef *fqname)
+        apiVersionRangeDef *api_range, scopedNameDef *fqname, int tmpl_arg)
 {
-    return findClassWithInterface(pt, findIfaceFile(pt, currentModule, fqname, iftype, api_range, NULL));
+    return findClassWithInterface(pt,
+            findIfaceFile(pt, currentModule, fqname, iftype, api_range, NULL),
+            tmpl_arg);
 }
 
 
 /*
  * Find a class definition given an existing interface file.
  */
-static classDef *findClassWithInterface(sipSpec *pt, ifaceFileDef *iff)
+static classDef *findClassWithInterface(sipSpec *pt, ifaceFileDef *iff,
+        int tmpl_arg)
 {
     classDef *cd;
 
-    for (cd = pt -> classes; cd != NULL; cd = cd -> next)
-        if (cd -> iff == iff)
+    for (cd = pt->classes; cd != NULL; cd = cd->next)
+        if (cd->iff == iff)
+        {
+            if (isTemplateArg(cd) && !tmpl_arg)
+                resetTemplateArg(cd);
+
             return cd;
+        }
 
     /* Create a new one. */
     cd = sipMalloc(sizeof (classDef));
+
+    if (tmpl_arg)
+        setTemplateArg(cd);
 
     cd->iff = iff;
     cd->pyname = cacheName(pt, classBaseName(cd));
@@ -4943,13 +5191,14 @@ static exceptionDef *findException(sipSpec *pt, scopedNameDef *fqname, int new)
         if (iff->type == exception_iface)
             iff->type = class_iface;
 
-        cd = findClassWithInterface(pt, iff);
+        cd = findClassWithInterface(pt, iff, FALSE);
     }
 
     /* Create a new one. */
     xd = sipMalloc(sizeof (exceptionDef));
 
     xd->exceptionnr = -1;
+    xd->needed = FALSE;
     xd->iff = iff;
     xd->pyname = NULL;
     xd->cd = cd;
@@ -4992,7 +5241,7 @@ static classDef *newClass(sipSpec *pt, ifaceFileType iftype,
             flags = CLASS_IS_PROTECTED;
 
             if (scope->iff->type == class_iface)
-                setHasShadow(scope);
+                setNeedsShadow(scope);
         }
 
         /* Header code from outer scopes is also included. */
@@ -5010,7 +5259,7 @@ static classDef *newClass(sipSpec *pt, ifaceFileType iftype,
         scope = NULL;
     }
 
-    cd = findClass(pt, iftype, api_range, fqname);
+    cd = findClass(pt, iftype, api_range, fqname, FALSE);
 
     /* Check it hasn't already been defined. */
     if (iftype != namespace_iface && cd->iff->module != NULL)
@@ -5047,6 +5296,10 @@ static classDef *newClass(sipSpec *pt, ifaceFileType iftype,
                 continue;
 
             cd->real = ns;
+
+            if (inMainModule())
+                ns->iff->first_alt->needed = TRUE;
+
             break;
         }
     }
@@ -5087,6 +5340,13 @@ static void finishClass(sipSpec *pt, moduleDef *mod, classDef *cd,
     if ((flg = getOptFlag(of, "FileExtension", string_flag)) != NULL)
         cd->iff->file_extension = flg->fvalue.sval;
 
+    if ((flg = getOptFlag(of, "PyQtFlagsEnums", string_list_flag)) != NULL)
+    {
+        cd->pyqt_flags_enums = flg->fvalue.slval;
+        cd->pyqt_flags = 1;
+    }
+
+    /* This is deprecated and only used by versions before v5.12. */
     if ((flg = getOptFlag(of, "PyQtFlags", integer_flag)) != NULL)
         cd->pyqt_flags = flg->fvalue.ival;
 
@@ -5334,17 +5594,18 @@ static mappedTypeDef *newMappedType(sipSpec *pt, argDef *ad, optFlags *of)
     switch (ad->atype)
     {
     case defined_type:
-        snd = ad->u.snd;
+        snd = ad->u.snd = fullyQualifiedName(ad->u.snd);
         cname = scopedNameTail(snd);
         break;
 
     case template_type:
+        ad->u.td->fqname = fullyQualifiedName(ad->u.td->fqname);
         snd = encodedTemplateName(ad->u.td);
         cname = NULL;
         break;
 
     case struct_type:
-        snd = ad->u.sname;
+        snd = ad->u.sname = fullyQualifiedName(ad->u.sname);
         cname = scopedNameTail(snd);
         break;
 
@@ -5410,6 +5671,9 @@ mappedTypeDef *allocMappedType(sipSpec *pt, argDef *type)
 
     mtd->cname = cacheName(pt, type2string(&mtd->type));
 
+    /* Keep track of the original definition as it gets copied. */
+    mtd->real = mtd;
+
     return mtd;
 }
 
@@ -5418,7 +5682,7 @@ mappedTypeDef *allocMappedType(sipSpec *pt, argDef *type)
  * Create a new enum.
  */
 static enumDef *newEnum(sipSpec *pt, moduleDef *mod, mappedTypeDef *mt_scope,
-        char *name, optFlags *of, int flags)
+        char *name, optFlags *of, int flags, int isscoped)
 {
     enumDef *ed, *first_alt, *next_alt;
     classDef *c_scope;
@@ -5494,7 +5758,7 @@ static enumDef *newEnum(sipSpec *pt, moduleDef *mod, mappedTypeDef *mt_scope,
         }
         else if (c_scope != NULL)
         {
-            setHasShadow(c_scope);
+            setNeedsShadow(c_scope);
         }
     }
 
@@ -5509,12 +5773,16 @@ static enumDef *newEnum(sipSpec *pt, moduleDef *mod, mappedTypeDef *mt_scope,
     ed->members = NULL;
     ed->slots = NULL;
     ed->overs = NULL;
+    ed->platforms = currentPlatforms;
     ed->next = pt -> enums;
 
     pt->enums = ed;
 
     if (getOptFlag(of, "NoScope", bool_flag) != NULL)
         setIsNoScope(ed);
+
+    if (isscoped)
+        setIsScopedEnum(ed);
 
     return ed;
 }
@@ -5743,6 +6011,10 @@ static char *type2string(argDef *ad)
             s = "void *";
             break;
 
+        case size_type:
+            s = "size_t";
+            break;
+
         default:
             fatal("Unsupported type argument to type2string(): %d\n", ad->atype);
         }
@@ -5762,6 +6034,15 @@ static char *type2string(argDef *ad)
 
 
 /*
+ * Remove any explicit global scope.
+ */
+scopedNameDef *removeGlobalScope(scopedNameDef *snd)
+{
+    return ((snd != NULL && snd->name[0] == '\0') ? snd->next : snd);
+}
+
+
+/*
  * Convert a scoped name to a string on the heap.
  */
 static char *scopedNameToString(scopedNameDef *name)
@@ -5770,6 +6051,12 @@ static char *scopedNameToString(scopedNameDef *name)
     size_t len;
     scopedNameDef *snd;
     char *s, *dp;
+
+    /*
+     * We don't want the global scope (which probably should always be there,
+     * but we check anyway).
+     */
+    name = removeGlobalScope(name);
 
     /* Work out the length of buffer needed. */
     len = 0;
@@ -5816,7 +6103,8 @@ static char *scopedNameToString(scopedNameDef *name)
  */
 static void instantiateClassTemplate(sipSpec *pt, moduleDef *mod,
         classDef *scope, scopedNameDef *fqname, classTmplDef *tcd,
-        templateDef *td, const char *pyname)
+        templateDef *td, const char *pyname, int use_template_name,
+        docstringDef *docstring)
 {
     scopedNameDef *type_names, *type_values;
     classDef *cd;
@@ -5824,6 +6112,7 @@ static void instantiateClassTemplate(sipSpec *pt, moduleDef *mod,
     argDef *ad;
     ifaceFileList *iffl, **used;
     classList *cl;
+    stringList *sl;
 
     type_names = type_values = NULL;
     appendTypeStrings(classFQCName(tcd->cd), &tcd->sig, &td->types, NULL, &type_names, &type_values);
@@ -5846,9 +6135,15 @@ static void instantiateClassTemplate(sipSpec *pt, moduleDef *mod,
     /* Start with a shallow copy. */
     *cd = *tcd->cd;
 
+    if (docstring != NULL)
+        cd->docstring = docstring;
+
     resetIsTemplateClass(cd);
     cd->pyname = cacheName(pt, pyname);
     cd->td = td;
+
+    if (use_template_name)
+        setUseTemplateName(cd);
 
     /* Handle the interface file. */
     cd->iff = findIfaceFile(pt, mod, fqname, class_iface,
@@ -5886,35 +6181,45 @@ static void instantiateClassTemplate(sipSpec *pt, moduleDef *mod,
                 templateString(cd->typehint_out->raw_hint, type_names,
                         type_values));
 
+    /* Handle any flagged enums. */
+    if ((sl = cd->pyqt_flags_enums) != NULL)
+    {
+        cd->pyqt_flags_enums = NULL;
+
+        do
+        {
+            appendString(&cd->pyqt_flags_enums,
+                    templateString(sl->s, type_names, type_values));
+            sl = sl->next;
+        }
+        while (sl != NULL);
+    }
+
     /* Handle the super-classes. */
     for (cl = cd->supers; cl != NULL; cl = cl->next)
     {
-        const char *name;
         int a;
+        scopedNameDef *unscoped;
+
+        unscoped = removeGlobalScope(cl->cd->iff->fqcname);
 
         /* Ignore defined or scoped classes. */
-        if (cl->cd->iff->module != NULL || cl->cd->iff->fqcname->next != NULL)
+        if (cl->cd->iff->module != NULL || unscoped->next != NULL)
             continue;
 
-        name = cl->cd->iff->fqcname->name;
-
         for (a = 0; a < tcd->sig.nrArgs - 1; ++a)
-            if (strcmp(name, scopedNameTail(tcd->sig.args[a].u.snd)) == 0)
+            if (strcmp(unscoped->name, scopedNameTail(tcd->sig.args[a].u.snd)) == 0)
             {
                 argDef *tad = &td->types.args[a];
                 classDef *icd;
 
                 if (tad->atype == defined_type)
-                    icd = findClass(pt, class_iface, NULL, tad->u.snd);
+                    icd = findClass(pt, class_iface, NULL, tad->u.snd, FALSE);
                 else if (tad->atype == class_type)
                     icd = tad->u.cd;
                 else
-                    fatal("Template argument %s must expand to a class\n", name);
-
-                /*
-                 * Don't complain about the template argument being undefined.
-                 */
-                setTemplateArg(cl->cd);
+                    fatal("Template argument %s must expand to a class\n",
+                            unscoped->name);
 
                 cl->cd = icd;
             }
@@ -5940,8 +6245,8 @@ static void instantiateClassTemplate(sipSpec *pt, moduleDef *mod,
         /* Start with a shallow copy. */
         *nct = *oct;
 
-        templateSignature(&nct->pysig, FALSE, tcd, td, cd, type_names,
-                type_values);
+        templateSignature(&nct->pysig, oct->kwargs, FALSE, tcd, td, cd,
+                type_names, type_values);
 
         if (oct->cppsig == NULL)
             nct->cppsig = NULL;
@@ -5953,11 +6258,12 @@ static void instantiateClassTemplate(sipSpec *pt, moduleDef *mod,
 
             *nct->cppsig = *oct->cppsig;
 
-            templateSignature(nct->cppsig, FALSE, tcd, td, cd, type_names,
-                    type_values);
+            templateSignature(nct->cppsig, NoKwArgs, FALSE, tcd, td, cd,
+                    type_names, type_values);
         }
 
         nct->methodcode = templateCode(pt, used, nct->methodcode, type_names, type_values);
+        nct->premethodcode = templateCode(pt, used, nct->premethodcode, type_names, type_values);
 
         nct->next = NULL;
         *cttail = nct;
@@ -6063,8 +6369,8 @@ static overDef *instantiateTemplateOverloads(sipSpec *pt, overDef *tod,
                 break;
             }
 
-        templateSignature(&nod->pysig, TRUE, tcd, td, cd, type_names,
-                type_values);
+        templateSignature(&nod->pysig, od->kwargs, TRUE, tcd, td, cd,
+                type_names, type_values);
 
         if (od->cppsig == &od->pysig)
             nod->cppsig = &nod->pysig;
@@ -6074,32 +6380,14 @@ static overDef *instantiateTemplateOverloads(sipSpec *pt, overDef *tod,
 
             *nod->cppsig = *od->cppsig;
 
-            templateSignature(nod->cppsig, TRUE, tcd, td, cd, type_names,
-                    type_values);
+            templateSignature(nod->cppsig, NoKwArgs, TRUE, tcd, td, cd,
+                    type_names, type_values);
         }
 
         nod->methodcode = templateCode(pt, used, nod->methodcode, type_names, type_values);
+        nod->premethodcode = templateCode(pt, used, nod->premethodcode, type_names, type_values);
         nod->virtcallcode = templateCode(pt, used, nod->virtcallcode, type_names, type_values);
-
-        /* Handle any virtual handler. */
-        if (od->virthandler != NULL)
-        {
-            moduleDef *mod = cd->iff->module;
-
-            nod->virthandler = sipMalloc(sizeof (virtHandlerDef));
-
-            /* Start with a shallow copy. */
-            *nod->virthandler = *od->virthandler;
-
-            nod->virthandler->pysig = &nod->pysig;
-            nod->virthandler->cppsig = nod->cppsig;
-
-            nod->virthandler->module = mod;
-            nod->virthandler->virtcode = templateCode(pt, used, nod->virthandler->virtcode, type_names, type_values);
-            nod->virthandler->next = mod->virthandlers;
-
-            mod->virthandlers = nod->virthandler;
-        }
+        nod->virtcode = templateCode(pt, used, nod->virtcode, type_names, type_values);
 
         nod->next = NULL;
         *odtail = nod;
@@ -6251,9 +6539,9 @@ static void instantiateTemplateTypedefs(sipSpec *pt, classTmplDef *tcd,
 /*
  * Replace any template arguments in a signature.
  */
-static void templateSignature(signatureDef *sd, int result, classTmplDef *tcd,
-        templateDef *td, classDef *ncd, scopedNameDef *type_names,
-        scopedNameDef *type_values)
+static void templateSignature(signatureDef *sd, KwArgs kwargs, int result,
+        classTmplDef *tcd, templateDef *td, classDef *ncd,
+        scopedNameDef *type_names, scopedNameDef *type_values)
 {
     int a;
 
@@ -6261,7 +6549,18 @@ static void templateSignature(signatureDef *sd, int result, classTmplDef *tcd,
         templateType(&sd->result, tcd, td, ncd, type_names, type_values);
 
     for (a = 0; a < sd->nrArgs; ++a)
-        templateType(&sd->args[a], tcd, td, ncd, type_names, type_values);
+    {
+        argDef *ad = &sd->args[a];
+
+        templateType(ad, tcd, td, ncd, type_names, type_values);
+
+        /* Make sure we have the name of any keyword argument. */
+        if (inMainModule() && ad->name != NULL)
+        {
+            if (kwargs == AllKwArgs || (kwargs == OptionalKwArgs && ad->defval != NULL))
+                setIsUsedName(ad->name);
+        }
+    }
 }
 
 
@@ -6283,10 +6582,44 @@ static void templateType(argDef *ad, classTmplDef *tcd, templateDef *td,
         *new_td = *ad->u.td;
         ad->u.td = new_td;
 
-        templateSignature(&ad->u.td->types, FALSE, tcd, td, ncd, type_names,
-                type_values);
+        templateSignature(&ad->u.td->types, NoKwArgs, FALSE, tcd, td, ncd,
+                type_names, type_values);
 
         return;
+    }
+
+    /* Handle any default value. */
+    if (ad->defval != NULL && ad->defval->vtype == fcall_value)
+    {
+        /*
+         * We only handle the subset where the value is an function call, ie. a
+         * template ctor.
+         */
+        valueDef *vd = ad->defval;
+
+        if (vd->vtype == fcall_value && vd->u.fcd->type.atype == defined_type)
+        {
+            valueDef *new_vd;
+            fcallDef *fcd;
+            scopedNameDef *snd, **tailp;
+
+            fcd = sipMalloc(sizeof (fcallDef));
+            *fcd = *vd->u.fcd;
+
+            tailp = &fcd->type.u.snd;
+            for (snd = vd->u.fcd->type.u.snd; snd != NULL; snd = snd->next)
+            {
+                *tailp = text2scopePart(
+                        templateString(snd->name, type_names, type_values));
+                tailp = &(*tailp)->next;
+            }
+
+            new_vd = sipMalloc(sizeof (valueDef));
+            new_vd->vtype = fcall_value;
+            new_vd->u.fcd = fcd;
+
+            ad->defval = new_vd;
+        }
     }
 
     /* Handle any type hints. */
@@ -6549,6 +6882,17 @@ static void addUsedFromCode(sipSpec *pt, ifaceFileList **used, const char *sname
  */
 static int sameName(scopedNameDef *snd, const char *sname)
 {
+    /* Handle any explicit scopes. */
+    if (sname[0] == ':' && sname[1] == ':')
+    {
+        if (snd->name[0] != '\0')
+            return FALSE;
+
+        sname += 2;
+    }
+
+    snd = removeGlobalScope(snd);
+
     while (snd != NULL && *sname != '\0')
     {
         const char *sp = snd->name;
@@ -6602,14 +6946,16 @@ static int foundInScope(scopedNameDef *fq_name, scopedNameDef *rel_name)
  * Create a new typedef.
  */
 static void newTypedef(sipSpec *pt, moduleDef *mod, char *name, argDef *type,
-        optFlags *optflgs)
+        optFlags *optflgs, docstringDef *docstring)
 {
+    int no_type_name;
     typedefDef *td;
     scopedNameDef *fqname;
     classDef *scope;
 
     scope = currentScope();
     fqname = text2scopedName((scope != NULL ? scope->iff : NULL), name);
+    no_type_name = (getOptFlag(optflgs, "NoTypeName", bool_flag) != NULL);
 
     /* See if we are instantiating a template class. */
     if (type->atype == template_type)
@@ -6622,7 +6968,8 @@ static void newTypedef(sipSpec *pt, moduleDef *mod, char *name, argDef *type,
                 sameTemplateSignature(&tcd->sig, &td->types, FALSE))
             {
                 instantiateClassTemplate(pt, mod, scope, fqname, tcd, td,
-                        getPythonName(mod, optflgs, name));
+                        getPythonName(mod, optflgs, name), no_type_name,
+                        docstring);
 
                 /* All done. */
                 return;
@@ -6635,6 +6982,7 @@ static void newTypedef(sipSpec *pt, moduleDef *mod, char *name, argDef *type,
     td->fqname = fqname;
     td->ecd = scope;
     td->module = mod;
+    td->platforms = currentPlatforms;
     td->type = *type;
 
     if (getOptFlag(optflgs, "Capsule", bool_flag) != NULL)
@@ -6651,7 +6999,7 @@ static void newTypedef(sipSpec *pt, moduleDef *mod, char *name, argDef *type,
         td->type.u.cap = fqname;
     }
 
-    if (getOptFlag(optflgs, "NoTypeName", bool_flag) != NULL)
+    if (no_type_name)
         setNoTypeName(td);
 
     addTypedef(pt, td);
@@ -6666,20 +7014,20 @@ static void addTypedef(sipSpec *pt, typedefDef *tdd)
     typedefDef **tdp;
 
     /*
-     * Check it doesn't already exist and find the position in the sorted list
-     * where it should be put.
+     * Check it doesn't already exist (with a strict parse) and find the
+     * position in the sorted list where it should be put.
      */
     for (tdp = &pt->typedefs; *tdp != NULL; tdp = &(*tdp)->next)
     {
         int res = compareScopedNames((*tdp)->fqname, tdd->fqname);
 
-        if (res == 0)
+        if (res == 0 && strictParse)
         {
             fatalScopedName(tdd->fqname);
             fatal(" already defined\n");
         }
 
-        if (res > 0)
+        if (res >= 0)
             break;
     }
 
@@ -6824,6 +7172,7 @@ static void newVar(sipSpec *pt, moduleDef *mod, char *name, int isstatic,
     var->module = mod;
     var->varflags = 0;
     var->no_typehint = getNoTypeHint(of);
+    var->platforms = currentPlatforms;
     var->type = *type;
     appendCodeBlock(&var->accessfunc, acode);
     appendCodeBlock(&var->getcode, gcode);
@@ -6845,17 +7194,15 @@ static void newVar(sipSpec *pt, moduleDef *mod, char *name, int isstatic,
 static void newCtor(moduleDef *mod, char *name, int sectFlags,
         signatureDef *args, optFlags *optflgs, codeBlock *methodcode,
         throwArgs *exceptions, signatureDef *cppsig, int explicit,
-        codeBlock *docstring)
+        docstringDef *docstring, codeBlock *premethodcode)
 {
+    int a;
     ctorDef *ct, **ctp;
     classDef *cd = currentScope();
 
     /* Check the name of the constructor. */
     if (strcmp(classBaseName(cd), name) != 0)
         yyerror("Constructor doesn't have the same name as its class");
-
-    if (docstring != NULL)
-        appendCodeBlock(&cd->docstring, docstring);
 
     /* Add to the list of constructors. */
     ct = sipMalloc(sizeof (ctorDef));
@@ -6870,19 +7217,22 @@ static void newCtor(moduleDef *mod, char *name, int sectFlags,
     memset(&args->result, 0, sizeof (argDef));
     args->result.atype = void_type;
 
+    ct->docstring = docstring;
     ct->ctorflags = sectFlags;
     ct->no_typehint = getNoTypeHint(optflgs);
     ct->api_range = getAPIRange(optflgs);
     ct->pysig = *args;
     ct->cppsig = (cppsig != NULL ? cppsig : &ct->pysig);
     ct->exceptions = exceptions;
+    ct->platforms = currentPlatforms;
     appendCodeBlock(&ct->methodcode, methodcode);
+    appendCodeBlock(&ct->premethodcode, premethodcode);
 
     if (!isPrivateCtor(ct))
         setCanCreate(cd);
 
     if (isProtectedCtor(ct))
-        setHasShadow(cd);
+        setNeedsShadow(cd);
 
     if (explicit)
         setIsExplicitCtor(ct);
@@ -6928,6 +7278,15 @@ static void newCtor(moduleDef *mod, char *name, int sectFlags,
         cd->defctor = ct;
     }
 
+    /* /Transfer/ arguments need the wrapper. */
+    for (a = 0; a < ct->pysig.nrArgs; ++a)
+    {
+        argDef *ad = &ct->pysig.args[a];
+
+        if (isTransferred(ad))
+            setGetWrapper(ad);
+    }
+
     /* Append to the list. */
     for (ctp = &cd->ctors; *ctp != NULL; ctp = &(*ctp)->next)
         ;
@@ -6940,11 +7299,12 @@ static void newCtor(moduleDef *mod, char *name, int sectFlags,
  * Create a new function.
  */
 static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
-        mappedTypeDef *mt_scope, int sflags, int isstatic, int issignal,
-        int isslot, int isvirt, char *name, signatureDef *sig, int isconst,
-        int isabstract, optFlags *optflgs, codeBlock *methodcode,
-        codeBlock *vcode, codeBlock *virtcallcode, throwArgs *exceptions,
-        signatureDef *cppsig, codeBlock *docstring)
+        ifaceFileDef *ns_scope, mappedTypeDef *mt_scope, int sflags,
+        int isstatic, int issignal, int isslot, int isvirt, char *name,
+        signatureDef *sig, int isconst, int isabstract, optFlags *optflgs,
+        codeBlock *methodcode, codeBlock *vcode, codeBlock *virtcallcode,
+        throwArgs *exceptions, signatureDef *cppsig, docstringDef *docstring,
+        int isfinal, codeBlock *premethodcode)
 {
     static const char *annos[] = {
         "__len__",
@@ -6989,7 +7349,6 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
     int factory, xferback, no_arg_parser, no_virt_error_handler;
     overDef *od, **odp, **headp;
     optFlag *of;
-    virtHandlerDef *vhd;
 
     checkAnnos(optflgs, annos);
 
@@ -7123,12 +7482,12 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
     }
 
     if (isProtected(od))
-        setHasShadow(c_scope);
+        setNeedsShadow(c_scope);
 
     if ((isSlot(od) || isSignal(od)) && !isPrivate(od))
     {
         if (isSignal(od))
-            setHasShadow(c_scope);
+            setNeedsShadow(c_scope);
 
         pt->sigslots = TRUE;
     }
@@ -7150,6 +7509,9 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
     if (isconst)
         setIsConst(od);
 
+    if (isfinal)
+        setIsFinal(od);
+
     if (isabstract)
     {
         if (sflags == 0)
@@ -7169,25 +7531,14 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
 
     if (isvirt)
     {
-        if (isSignal(od) && pluginPyQt3(pt))
-            yyerror("Virtual signals aren't supported");
-
-        setIsVirtual(od);
-        setHasShadow(c_scope);
-
-        vhd = sipMalloc(sizeof (virtHandlerDef));
-
-        vhd->virthandlernr = -1;
-        vhd->vhflags = 0;
-        vhd->pysig = &od->pysig;
-        vhd->cppsig = (cppsig != NULL ? cppsig : &od->pysig);
-        appendCodeBlock(&vhd->virtcode, vcode);
-
-        if (factory || xferback)
-            setIsTransferVH(vhd);
+        if (!isfinal)
+        {
+            setIsVirtual(od);
+            setNeedsShadow(c_scope);
+        }
 
         if (getOptFlag(optflgs, "AbortOnException", bool_flag) != NULL)
-            setAbortOnException(vhd);
+            setAbortOnException(od);
 
         if (no_virt_error_handler)
         {
@@ -7200,18 +7551,6 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
         {
             od->virt_error_handler = virt_error_handler;
         }
-
-        /*
-         * Only add it to the module's virtual handlers if we are not in a
-         * class template.
-         */
-        if (!currentIsTemplate)
-        {
-            vhd->module = mod;
-
-            vhd->next = mod->virthandlers;
-            mod->virthandlers = vhd;
-        }
     }
     else
     {
@@ -7223,17 +7562,17 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
 
         if (no_virt_error_handler)
             yyerror("/NoVirtualErrorHandler/ provided for non-virtual function");
-
-        vhd = NULL;
     }
 
     od->cppname = name;
     od->pysig = *sig;
     od->cppsig = (cppsig != NULL ? cppsig : &od->pysig);
     od->exceptions = exceptions;
+    od->platforms = currentPlatforms;
     appendCodeBlock(&od->methodcode, methodcode);
+    appendCodeBlock(&od->premethodcode, premethodcode);
     appendCodeBlock(&od->virtcallcode, virtcallcode);
-    od->virthandler = vhd;
+    appendCodeBlock(&od->virtcode, vcode);
 
     no_arg_parser = (getOptFlag(optflgs, "NoArgParser", bool_flag) != NULL);
 
@@ -7267,7 +7606,7 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
 
     pyname = getPythonName(mod, optflgs, name);
 
-    od->common = findFunction(pt, mod, c_scope, mt_scope, pyname,
+    od->common = findFunction(pt, mod, c_scope, ns_scope, mt_scope, pyname,
             (methodcode != NULL), sig->nrArgs, no_arg_parser);
 
     if (isProtected(od))
@@ -7276,8 +7615,7 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
     if (strcmp(pyname, "__delattr__") == 0)
         setIsDelattr(od);
 
-    if (docstring != NULL)
-        appendCodeBlock(&od->common->docstring, docstring);
+    od->docstring = docstring;
 
     od->api_range = getAPIRange(optflgs);
 
@@ -7330,7 +7668,7 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
     if (getDeprecated(optflgs))
         setIsDeprecated(od);
 
-    if (!isPrivate(od) && !isSignal(od) && (od->common->slot == no_slot || od->common->slot == call_slot))
+    if (!isPrivate(od) && (od->common->slot == no_slot || od->common->slot == call_slot))
     {
         od->kwargs = keywordArgs(mod, optflgs, &od->pysig, hasProtected(od->common));
 
@@ -7342,7 +7680,7 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
          * we need to make sure that any other overloads' keyword argument
          * names are marked as used.
          */
-        if (isProtected(od) && !inMainModule())
+        if (!isSignal(od) && isProtected(od) && !inMainModule())
         {
             overDef *kwod;
 
@@ -7397,9 +7735,10 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
             appendCodeBlock(&len->methodcode, code);
         }
 
-        len->common = findFunction(pt, mod, c_scope, mt_scope, len->cppname,
-                TRUE, 0, FALSE);
+        len->common = findFunction(pt, mod, c_scope, ns_scope, mt_scope,
+                len->cppname, TRUE, 0, FALSE);
 
+        len->platforms = od->platforms;
         len->next = od->next;
         od->next = len;
     }
@@ -7417,10 +7756,11 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
 
         matmul->methodcode = od->methodcode;
 
-        matmul->common = findFunction(pt, mod, c_scope, mt_scope,
+        matmul->common = findFunction(pt, mod, c_scope, ns_scope, mt_scope,
                 matmul->cppname, (matmul->methodcode != NULL),
                 matmul->pysig.nrArgs, FALSE);
 
+        matmul->platforms = od->platforms;
         matmul->next = od->next;
         od->next = matmul;
     }
@@ -7438,10 +7778,11 @@ static void newFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
 
         imatmul->methodcode = od->methodcode;
 
-        imatmul->common = findFunction(pt, mod, c_scope, mt_scope,
+        imatmul->common = findFunction(pt, mod, c_scope, ns_scope, mt_scope,
                 imatmul->cppname, (imatmul->methodcode != NULL),
                 imatmul->pysig.nrArgs, FALSE);
 
+        imatmul->platforms = od->platforms;
         imatmul->next = od->next;
         od->next = imatmul;
     }
@@ -7526,8 +7867,8 @@ nameDef *cacheName(sipSpec *pt, const char *name)
  * Find (or create) an overloaded function name.
  */
 static memberDef *findFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
-        mappedTypeDef *mt_scope, const char *pname, int hwcode, int nrargs,
-        int no_arg_parser)
+        ifaceFileDef *ns_scope, mappedTypeDef *mt_scope, const char *pname,
+        int hwcode, int nrargs, int no_arg_parser)
 {
     static struct slot_map {
         const char *name;   /* The slot name. */
@@ -7661,6 +8002,7 @@ static memberDef *findFunction(sipSpec *pt, moduleDef *mod, classDef *c_scope,
         md->memberflags = 0;
         md->slot = st;
         md->module = mod;
+        md->ns_scope = ns_scope;
         md->next = *flist;
 
         *flist = md;
@@ -7738,6 +8080,43 @@ static optFlag *getOptFlag(optFlags *flgs, const char *name, flagType ft)
             }
         }
 
+        /* A string list will look like a string. */
+        if (ft == string_list_flag && of->ftype == string_flag)
+        {
+            char *s;
+
+            s = of->fvalue.sval;
+            of->fvalue.slval = NULL;
+
+            while (*s != '\0')
+            {
+                char *start;
+
+                while (*s == ' ')
+                    ++s;
+
+                start = s;
+
+                if (*start != '\0')
+                {
+                    char saved, *end;
+
+                    for (end = start + 1; *end != ' ' && *end != '\0'; ++end)
+                        ;
+
+                    saved = *end;
+                    *end = '\0';
+
+                    appendString(&of->fvalue.slval, start);
+
+                    *end = saved;
+                    s = end;
+                }
+            }
+
+            of->ftype = string_list_flag;
+        }
+
         if (ft != of->ftype)
             yyerror("Annotation has a value of the wrong type");
     }
@@ -7758,12 +8137,13 @@ static void checkAttributes(sipSpec *pt, moduleDef *mod, classDef *py_c_scope,
     varDef *vd;
     classDef *cd;
 
-    /* Check the enums. */
+    /* We don't do any check for a non-strict parse. */
+    if (!strictParse)
+        return;
 
+    /* Check the enums. */
     for (ed = pt->enums; ed != NULL; ed = ed->next)
     {
-        enumMemberDef *emd;
-
         if (ed->pyname == NULL)
             continue;
 
@@ -7785,14 +8165,19 @@ static void checkAttributes(sipSpec *pt, moduleDef *mod, classDef *py_c_scope,
         if (strcmp(ed->pyname->text, attr) == 0)
             yyerror("There is already an enum in scope with the same Python name");
 
-        for (emd = ed->members; emd != NULL; emd = emd->next)
-            if (strcmp(emd->pyname->text, attr) == 0)
-                yyerror("There is already an enum member in scope with the same Python name");
+        if (!isScopedEnum(ed))
+        {
+            enumMemberDef *emd;
+
+            for (emd = ed->members; emd != NULL; emd = emd->next)
+                if (strcmp(emd->pyname->text, attr) == 0)
+                    yyerror("There is already an enum member in scope with the same Python name");
+        }
     }
 
     /*
-     * Only check the members if this attribute isn't a member because we
-     * can handle members with the same name in the same scope.
+     * Only check the members if this attribute isn't a member because we can
+     * handle members with the same name in the same scope.
      */
     if (!isfunc)
     {
@@ -7930,10 +8315,10 @@ static void handleEOF()
      * the file.
      */
 
-    if (skipStackPtr > currentContext.ifdepth)
+    if (stackPtr > currentContext.ifdepth)
         fatal("Too many %%If statements in %s\n", previousFile);
 
-    if (skipStackPtr < currentContext.ifdepth)
+    if (stackPtr < currentContext.ifdepth)
         fatal("Too many %%End statements in %s\n", previousFile);
 }
 
@@ -8105,7 +8490,7 @@ void freeScopedName(scopedNameDef *snd)
 /*
  * Convert a text string to a scope part structure.
  */
-static scopedNameDef *text2scopePart(char *text)
+scopedNameDef *text2scopePart(char *text)
 {
     scopedNameDef *snd;
 
@@ -8134,7 +8519,7 @@ static scopedNameDef *scopeScopedName(ifaceFileDef *scope, scopedNameDef *name)
 {
     scopedNameDef *snd;
 
-    snd = (scope != NULL ? copyScopedName(scope->fqcname) : NULL);
+    snd = (scope != NULL ? copyScopedName(scope->fqcname) : text2scopePart(""));
 
     appendScopedName(&snd, name);
 
@@ -8150,10 +8535,10 @@ char *scopedNameTail(scopedNameDef *snd)
     if (snd == NULL)
         return NULL;
 
-    while (snd -> next != NULL)
-        snd = snd -> next;
+    while (snd->next != NULL)
+        snd = snd->next;
 
-    return snd -> name;
+    return snd->name;
 }
 
 
@@ -8188,7 +8573,7 @@ static void popScope(void)
  */
 static int notSkipping()
 {
-    return (skipStackPtr == 0 ? TRUE : skipStack[skipStackPtr - 1]);
+    return (stackPtr == 0 ? TRUE : skipStack[stackPtr - 1]);
 }
 
 
@@ -8301,32 +8686,79 @@ static int isBackstop(qualDef *qd)
 /*
  * Return the value of an expression involving a single platform or feature.
  */
-static int platOrFeature(char *name,int optnot)
+static int platOrFeature(char *name, int optnot)
 {
     int this;
     qualDef *qd;
 
-    if ((qd = findQualifier(name)) == NULL || qd -> qtype == time_qualifier)
+    if ((qd = findQualifier(name)) == NULL || qd->qtype == time_qualifier)
         yyerror("No such platform or feature");
 
     /* Assume this sub-expression is false. */
 
     this = FALSE;
 
-    if (qd -> qtype == feature_qualifier)
+    if (qd->qtype == feature_qualifier)
     {
         if (!excludedFeature(excludedQualifiers, qd))
             this = TRUE;
     }
-    else if (selectedQualifier(neededQualifiers, qd))
+    else
     {
-        this = TRUE;
+        if (!strictParse)
+        {
+            if (optnot)
+            {
+                moduleDef *mod;
+
+                /* Add every platform except the one we have. */
+                for (mod = currentSpec->modules; mod != NULL; mod = mod->next)
+                {
+                    qualDef *not_qd;
+
+                    for (not_qd = mod->qualifiers; not_qd != NULL; not_qd = not_qd->next)
+                        if (not_qd->qtype == platform_qualifier && strcmp(not_qd->name, qd->name) != 0)
+                            addPlatform(not_qd);
+                }
+            }
+            else
+            {
+                addPlatform(qd);
+            }
+
+            /*
+             * If it is a non-strict parse then this is always TRUE, ie. we
+             * never skip because of the platform.
+             */
+            return TRUE;
+        }
+
+        if (selectedQualifier(neededQualifiers, qd))
+            this = TRUE;
     }
 
     if (optnot)
         this = !this;
 
     return this;
+}
+
+
+/*
+ * Add a platform to the current list of platforms if it is not already there.
+ */
+static void addPlatform(qualDef *qd)
+{
+    platformDef *pd;
+
+    for (pd = currentPlatforms; pd != NULL; pd = pd->next)
+        if (pd->qualifier == qd)
+            return;
+
+    pd = sipMalloc(sizeof (platformDef));
+    pd->qualifier = qd;
+    pd->next = currentPlatforms;
+    currentPlatforms = pd;
 }
 
 
@@ -8378,9 +8810,20 @@ static classDef *currentScope(void)
 static void newQualifier(moduleDef *mod, int line, int order,
         int default_enabled, const char *name, qualType qt)
 {
-    /* Check it doesn't already exist. */
-    if (findQualifier(name) != NULL)
-        yyerror("Version is already defined");
+    qualDef *qd;
+
+    /* See if it already exists. */
+    if ((qd = findQualifier(name)) != NULL)
+    {
+        /*
+         * We allow versions to be defined more than once so long as they are
+         * in different timelines.  It is sometimes necessary to define the
+         * same timeline in multiple modules if a module that others depend on
+         * is added during the timeline (eg. QtWebEngineCore).
+         */
+        if (qd->qtype != time_qualifier || qt != time_qualifier || (qd->module == mod && qd->line == line))
+            yyerror("Version is already defined");
+    }
 
     allocQualifier(mod, line, order, default_enabled, name, qt);
 }
@@ -8623,15 +9066,6 @@ static int getNoTypeHint(optFlags *optflgs)
 
 
 /*
- * Return TRUE if the PyQt3 plugin was specified.
- */
-int pluginPyQt3(sipSpec *pt)
-{
-    return stringFind(pt->plugins, "PyQt3");
-}
-
-
-/*
  * Return TRUE if the PyQt4 plugin was specified.
  */
 int pluginPyQt4(sipSpec *pt)
@@ -8688,17 +9122,28 @@ static void setModuleName(sipSpec *pt, moduleDef *mod, const char *fullname)
  */
 static void defineClass(scopedNameDef *snd, classList *supers, optFlags *of)
 {
-    classDef *cd, *c_scope = currentScope();
+    classDef *cd;
     typeHintDef *in, *out;
 
     getTypeHints(of, &in, &out);
 
     cd = newClass(currentSpec, class_iface, getAPIRange(of),
-            scopeScopedName((c_scope != NULL ? c_scope->iff : NULL), snd),
-            getVirtErrorHandler(of), in, out, getTypeHintValue(of));
+            fullyQualifiedName(snd), getVirtErrorHandler(of), in, out,
+            getTypeHintValue(of));
     cd->supers = supers;
 
     pushScope(cd);
+}
+
+
+/*
+ * Return a fully qualified scoped name.
+ */
+static scopedNameDef *fullyQualifiedName(scopedNameDef *snd)
+{
+    classDef *scope = currentScope();
+
+    return scopeScopedName((scope != NULL ? scope->iff : NULL), snd);
 }
 
 
@@ -8819,6 +9264,24 @@ static Format convertFormat(const char *format)
         return deindented;
 
     yyerror("The docstring format must be either \"raw\" or \"deindented\"");
+}
+
+
+/*
+ * Return the Signature for a string.
+ */
+static Signature convertSignature(const char *signature)
+{
+    if (strcmp(signature, "discarded") == 0)
+        return discarded;
+
+    if (strcmp(signature, "prepended") == 0)
+        return prepended;
+
+    if (strcmp(signature, "appended") == 0)
+        return appended;
+
+    yyerror("The docstring signature must be either \"discarded\", \"prepended\" or \"appended\"");
 }
 
 
@@ -9047,7 +9510,7 @@ static int isEnabledFeature(const char *name)
  */
 static void addProperty(sipSpec *pt, moduleDef *mod, classDef *cd,
         const char *name, const char *get, const char *set,
-        codeBlock *docstring)
+        docstringDef *docstring)
 {
     propertyDef *pd;
 
@@ -9058,7 +9521,8 @@ static void addProperty(sipSpec *pt, moduleDef *mod, classDef *cd,
     pd->name = cacheName(pt, name);
     pd->get = get;
     pd->set = set;
-    appendCodeBlock(&pd->docstring, docstring);
+    pd->docstring = docstring;
+    pd->platforms = currentPlatforms;
     pd->next = cd->properties;
 
     cd->properties = pd;
@@ -9072,10 +9536,10 @@ static void addProperty(sipSpec *pt, moduleDef *mod, classDef *cd,
  * Configure a module and return the (possibly new) current module.
  */
 static moduleDef *configureModule(sipSpec *pt, moduleDef *module,
-        const char *filename, const char *name, int version, int c_module,
-        KwArgs kwargs, int use_arg_names, int call_super_init,
+        const char *filename, const char *name, int c_module, KwArgs kwargs,
+        int use_arg_names, int use_limited_api, int call_super_init,
         int all_raise_py_exc, const char *def_error_handler,
-        codeBlock *docstring, const char *nameshort)
+        docstringDef *docstring, const char *nameshort)
 {
     moduleDef *mod;
 
@@ -9101,8 +9565,7 @@ static moduleDef *configureModule(sipSpec *pt, moduleDef *module,
     setModuleName(pt, module, name);
     module->kwargs = kwargs;
     module->virt_error_handler = def_error_handler;
-    module->version = version;
-    appendCodeBlock(&module->docstring, docstring);
+    module->docstring = docstring;
 
     if (nameshort != NULL)
         module->nameshort = nameshort;
@@ -9112,6 +9575,9 @@ static moduleDef *configureModule(sipSpec *pt, moduleDef *module,
 
     if (use_arg_names)
         setUseArgNames(module);
+
+    if (use_limited_api)
+        setUseLimitedAPI(module);
 
     if (call_super_init == 0)
         setCallSuperInitNo(module);

@@ -1,7 +1,7 @@
 /*
  * The PEP 484 type hints generator for SIP.
  *
- * Copyright (c) 2016 Riverbank Computing Limited <info@riverbankcomputing.com>
+ * Copyright (c) 2018 Riverbank Computing Limited <info@riverbankcomputing.com>
  *
  * This file is part of SIP.
  *
@@ -43,6 +43,9 @@ static void pyiCtor(sipSpec *pt, moduleDef *mod, classDef *cd, ctorDef *ct,
 static void pyiCallable(sipSpec *pt, moduleDef *mod, memberDef *md,
         overDef *overloads, int is_method, ifaceFileList *defined, int indent,
         FILE *fp);
+static void pyiProperty(sipSpec *pt, moduleDef *mod, propertyDef *pd,
+        int is_setter, memberDef *md, overDef *overloads,
+        ifaceFileList *defined, int indent, FILE *fp);
 static void pyiOverload(sipSpec *pt, moduleDef *mod, overDef *od,
         int overloaded, int is_method, int sec, ifaceFileList *defined,
         int indent, int pep484, FILE *fp);
@@ -54,10 +57,8 @@ static int pyiArgument(sipSpec *pt, moduleDef *mod, argDef *ad, int arg_nr,
         ifaceFileList *defined, KwArgs kwargs, int pep484, FILE *fp);
 static void pyiType(sipSpec *pt, moduleDef *mod, argDef *ad, int out, int sec,
         ifaceFileList *defined, int pep484, FILE *fp);
-static void pyiTypeHint(sipSpec *pt, typeHintDef *thd, moduleDef *mod, int out,
-        ifaceFileList *defined, int pep484, FILE *fp);
 static void pyiTypeHintNode(typeHintNodeDef *node, moduleDef *mod,
-        ifaceFileList *defined, int pep484, FILE *fp);
+        ifaceFileList *defined, int pep484, int rest, FILE *fp);
 static void prIndent(int indent, FILE *fp);
 static int separate(int first, int indent, FILE *fp);
 static void prClassRef(classDef *cd, moduleDef *mod, ifaceFileList *defined,
@@ -284,6 +285,7 @@ static void pyiClass(sipSpec *pt, moduleDef *mod, classDef *cd,
     classDef *nested;
     ctorDef *ct;
     memberDef *md;
+    propertyDef *pd;
 
     separate(TRUE, indent, fp);
     prIndent(indent, fp);
@@ -463,6 +465,27 @@ static void pyiClass(sipSpec *pt, moduleDef *mod, classDef *cd,
         first = separate(first, indent, fp);
 
         pyiCallable(pt, mod, md, cd->overs, TRUE, *defined, indent, fp);
+    }
+
+    for (pd = cd->properties; pd != NULL; pd = pd->next)
+    {
+        first = separate(first, indent, fp);
+
+        if (pd->get != NULL)
+        {
+            if ((md = findMethod(cd, pd->get)) != NULL)
+            {
+                pyiProperty(pt, mod, pd, FALSE, md, cd->overs, *defined,
+                        indent, fp);
+
+                if (pd->set != NULL)
+                {
+                    if ((md = findMethod(cd, pd->set)) != NULL)
+                        pyiProperty(pt, mod, pd, TRUE, md, cd->overs, *defined,
+                                indent, fp);
+                }
+            }
+        }
     }
 
     /*
@@ -722,6 +745,48 @@ static void pyiCallable(sipSpec *pt, moduleDef *mod, memberDef *md,
 
 
 /*
+ * Generate the type hints for a property.
+ */
+static void pyiProperty(sipSpec *pt, moduleDef *mod, propertyDef *pd,
+        int is_setter, memberDef *md, overDef *overloads,
+        ifaceFileList *defined, int indent, FILE *fp)
+{
+    overDef *od;
+
+    /* Handle each overload. */
+    for (od = overloads; od != NULL; od = od->next)
+    {
+        if (isPrivate(od))
+            continue;
+
+        if (od->common != md)
+            continue;
+
+        if (od->no_typehint)
+            continue;
+
+        prIndent(indent, fp);
+
+        if (is_setter)
+            fprintf(fp, "@%s.setter\n", pd->name->text);
+        else
+            fprintf(fp, "@property\n");
+
+        prIndent(indent, fp);
+
+        fprintf(fp, "def %s", pd->name->text);
+
+        pyiPythonSignature(pt, mod, &od->pysig, TRUE, FALSE, defined,
+                od->kwargs, TRUE, fp);
+
+        fprintf(fp, ": ...\n");
+
+        break;
+    }
+}
+
+
+/*
  * Generate the docstring for a single API overload.
  */
 void dsOverload(sipSpec *pt, overDef *od, int is_method, int sec, FILE *fp)
@@ -889,7 +954,7 @@ static void pyiType(sipSpec *pt, moduleDef *mod, argDef *ad, int out, int sec,
 
     if (thd != NULL)
     {
-        pyiTypeHint(pt, thd, mod, out, defined, pep484, fp);
+        pyiTypeHint(pt, thd, mod, out, defined, pep484, FALSE, fp);
         return;
     }
 
@@ -969,6 +1034,10 @@ static void pyiType(sipSpec *pt, moduleDef *mod, argDef *ad, int out, int sec,
         break;
 
     case ustring_type:
+        /* Correct for Python v3. */
+        type_name = "bytes";
+        break;
+
     case string_type:
     case sstring_type:
     case wstring_type:
@@ -991,6 +1060,7 @@ static void pyiType(sipSpec *pt, moduleDef *mod, argDef *ad, int out, int sec,
     case int_type:
     case cint_type:
     case ssize_type:
+    case size_type:
         type_name = "int";
         break;
 
@@ -1061,7 +1131,7 @@ static void pyiType(sipSpec *pt, moduleDef *mod, argDef *ad, int out, int sec,
  */
 void prScopedPythonName(FILE *fp, classDef *scope, const char *pyname)
 {
-    if (scope != NULL)
+    if (scope != NULL && !isHiddenNamespace(scope))
     {
         prScopedPythonName(fp, scope->ecd, NULL);
         fprintf(fp, "%s.", scope->pyname->text);
@@ -1344,13 +1414,13 @@ typeHintDef *newTypeHint(char *raw_hint)
 /*
  * Generate a type hint from a /TypeHint/ annotation.
  */
-static void pyiTypeHint(sipSpec *pt, typeHintDef *thd, moduleDef *mod, int out,
-        ifaceFileList *defined, int pep484, FILE *fp)
+void pyiTypeHint(sipSpec *pt, typeHintDef *thd, moduleDef *mod, int out,
+        ifaceFileList *defined, int pep484, int rest, FILE *fp)
 {
     parseTypeHint(pt, thd, out);
 
     if (thd->root != NULL)
-        pyiTypeHintNode(thd->root, mod, defined, pep484, fp);
+        pyiTypeHintNode(thd->root, mod, defined, pep484, rest, fp);
     else
         maybeAnyObject(thd->raw_hint, pep484, fp);
 }
@@ -1360,12 +1430,13 @@ static void pyiTypeHint(sipSpec *pt, typeHintDef *thd, moduleDef *mod, int out,
  * Generate a single node of a type hint.
  */
 static void pyiTypeHintNode(typeHintNodeDef *node, moduleDef *mod,
-        ifaceFileList *defined, int pep484, FILE *fp)
+        ifaceFileList *defined, int pep484, int rest, FILE *fp)
 {
     switch (node->type)
     {
     case typing_node:
-        fprintf(fp, "%s%s", (pep484 ? "typing." : ""), node->u.name);
+        if (node->u.name != NULL)
+            fprintf(fp, "%s%s", (pep484 ? "typing." : ""), node->u.name);
 
         if (node->children != NULL)
         {
@@ -1381,7 +1452,7 @@ static void pyiTypeHintNode(typeHintNodeDef *node, moduleDef *mod,
 
                 need_comma = TRUE;
 
-                pyiTypeHintNode(thnd, mod, defined, pep484, fp);
+                pyiTypeHintNode(thnd, mod, defined, pep484, rest, fp);
             }
 
             fprintf(fp, "]");
@@ -1390,15 +1461,19 @@ static void pyiTypeHintNode(typeHintNodeDef *node, moduleDef *mod,
         break;
 
     case class_node:
-        prClassRef(node->u.cd, mod, defined, pep484, fp);
+        if (rest)
+            restPyClass(node->u.cd, fp);
+        else
+            prClassRef(node->u.cd, mod, defined, pep484, fp);
+
         break;
 
     case enum_node:
-        prEnumRef(node->u.ed, mod, defined, pep484, fp);
-        break;
+        if (rest)
+            restPyEnum(node->u.ed, fp);
+        else
+            prEnumRef(node->u.ed, mod, defined, pep484, fp);
 
-    case brackets_node:
-        fprintf(fp, "[]");
         break;
 
     case other_node:
@@ -1508,15 +1583,22 @@ static int parseTypeHintNode(sipSpec *pt, int out, int top_level, char *start,
             break;
         }
 
-    /* We must have a name unless we have empty brackets. */
+    /* We must have a name unless we have brackets. */
     if (name_start == name_end)
     {
-        if (top_level && have_brackets && children == NULL)
+        /* Check we have brackets. */
+        if (!have_brackets)
             return FALSE;
 
-        /* Return the representation of empty brackets. */
+        /* Check we don't have empty brackets at the top level. */
+        if (top_level && children == NULL)
+            return FALSE;
+
+        /* Return the representation of brackets. */
         node = sipMalloc(sizeof (typeHintNodeDef));
-        node->type = brackets_node;
+        node->type = typing_node;
+        node->u.name = NULL;
+        node->children = children;
     }
     else
     {
@@ -1631,7 +1713,7 @@ static const char *typingModule(const char *name)
 
 
 /*
- * Flatten an unions in a list of nodes.
+ * Flatten any unions in a list of nodes.
  */
 static typeHintNodeDef *flatten_unions(typeHintNodeDef *nodes)
 {

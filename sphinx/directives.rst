@@ -160,19 +160,29 @@ This directive (along with :directive:`%BIReleaseBufferCode`) is used to
 specify code that implements the buffer interface of Python v3.  If Python v2
 is being used then this is ignored.
 
-The following variables are made available to the handwritten code:
+The variables that are made available to the handwritten code depend on
+whether or not the limited Python API is enabled or not.  The following
+variables are made available:
+
+sipBufferDef \*sipBuffer
+    When the use of the limited API is enabled, this is a pointer to a
+    structure that should be populated by the code.  The ``bd_buffer`` field
+    should be set to the address of the buffer.  The ``bd_length`` field should
+    be set to the length of the buffer.  The ``bd_readonly`` field should be
+    set to a non-zero value if the buffer is read-only.
 
 Py_buffer \*sipBuffer
-    This is a pointer to the Python buffer structure that the handwritten code
-    must populate.
+    When the use of the limited Python API is disabled, this is a pointer to
+    the Python buffer structure that should be populated by the code.
 
 *type* \*sipCpp
     This is a pointer to the structure or class instance.  Its *type* is a
     pointer to the structure or class.
 
 int sipFlags
-    These are the flags that specify what elements of the ``sipBuffer``
-    structure must be populated.
+    When the use of the limited Python API is disabled, these are the flags
+    that specify what elements of the ``sipBuffer`` structure must be
+    populated.
 
 int sipRes
     The handwritten code should set this to 0 if there was no error or -1 if
@@ -329,10 +339,13 @@ This directive (along with :directive:`%BIGetBufferCode`) is used to specify
 code that implements the buffer interface of Python v3.  If Python v2 is being
 used then this is ignored.
 
-The following variables are made available to the handwritten code:
+The variables that are made available to the handwritten code depend on
+whether or not the limited Python API is enabled or not.  The following
+variables are made available:
 
 Py_buffer \*sipBuffer
-    This is a pointer to the Python buffer structure.
+    When the use of the limited Python API is disabled, this is a pointer to
+    the Python buffer structure.
 
 *type* \*sipCpp
     This is a pointer to the structure or class instance.  Its *type* is a
@@ -527,32 +540,13 @@ list of ``QWidget`` instances::
         *code*
     %End
 
-When SIP needs to wrap a C++ class instance it first checks to make sure it
-hasn't already done so.  If it has then it just returns a new reference to the
-corresponding Python object.  Otherwise it creates a new Python object of the
-appropriate type.  In C++ a function may be defined to return an instance of a
-certain class, but can often return a sub-class instead.
-
-This directive is used to specify handwritten code that exploits any available
-real-time type information (RTTI) to see if there is a more specific Python
-type that can be used when wrapping the C++ instance.  The RTTI may be
-provided by the compiler or by the C++ instance itself.
-
-The directive is included in the specification of one of the classes that the
-handwritten code handles the type conversion for.  It doesn't matter which
-one, but a sensible choice would be the one at the root of that class
-hierarchy in the module.
-
-Note that if a class hierarchy extends over a number of modules then this
-directive should be used in each of those modules to handle the part of the
-hierarchy defined in that module.  SIP will ensure that the different pieces
-of code are called in the right order to determine the most specific Python
-type to use.
+This directive is fully described in :ref:`ref-subclass-convertors`.
 
 The following variables are made available to the handwritten code:
 
 *type* \*sipCpp
-    This is a pointer to the C++ class instance.
+    This is a pointer to the C++ class instance.  It's type is the base class
+    of the convertor.
 
 void \*\*sipCppRet
     When the sub-class is derived from more than one super-class then it is
@@ -803,6 +797,27 @@ For example::
     %DefaultDocstringFormat "deindented"
 
 
+.. directive:: %DefaultDocstringSignature
+
+.. versionadded:: 4.19.7
+
+.. parsed-literal::
+
+    %DefaultDocstringSignature(name = ["discarded" | "prepended" | "appended"])
+
+This directive is used to specify the default positioning of signatures in
+docstrings, i.e. when the :directive:`%Docstring` directive is used but does
+not specify an explicit positioning.
+
+See the :directive:`%Docstring` directive for an explanation of the different
+ways signatures are positioned.  If the directive is not specified then the
+default positioning is ``"discarded"``.
+
+For example::
+
+    %DefaultDocstringSignature "prepended"
+
+
 .. directive:: %DefaultEncoding
 
 .. parsed-literal::
@@ -904,12 +919,12 @@ For example::
 
 .. parsed-literal::
 
-    %Docstring(format = ["raw" | "deindented"])
+    %Docstring(format = ["raw" | "deindented"], signature = ["discarded" | "prepended" | "appended"])
         *text*
     %End
 
 This directive is used to specify explicit docstrings for modules, classes,
-functions, methods and properties.
+functions, methods, typedefs and properties.
 
 The docstring of a class is made up of the docstring specified for the class
 itself, with the docstrings specified for each contructor appended.
@@ -917,23 +932,42 @@ itself, with the docstrings specified for each contructor appended.
 The docstring of a function or method is made up of the concatenated docstrings
 specified for each of the overloads.
 
-Specifying an explicit docstring will prevent SIP from generating an automatic
-docstring that describes the Python signature of a function or method overload.
-This means that SIP will generate less informative exceptions (i.e. without a
-full signature) when it fails to match a set of arguments to any function or
-method overload.
+.. note::
+
+    Specifying an explicit docstring will mean that SIP will generate less
+    informative exceptions (i.e. without a full signature) when it fails to
+    match a set of arguments to any function or method overload.
 
 .. versionadded:: 4.13
 
-The format may either be ``"raw"`` or ``"deindented"``.  If it is not specified
+``format`` may either be ``"raw"`` or ``"deindented"``.  If it is not specified
 then the value specified by any :directive:`%DefaultDocstringFormat` directive
 is used.
 
-If the format is ``"raw"`` then the docstring is used as it appears in the
+If ``format`` is ``"raw"`` then the docstring is used as it appears in the
 specification file.
 
-If the format is ``"deindented"`` then any leading spaces common to all
+If ``format`` is ``"deindented"`` then any leading spaces common to all
 non-blank lines of the docstring are removed.
+
+.. versionadded:: 4.19.7
+
+``signature`` may either be ``"discarded"``, ``"prepended"`` or ``"appended"``.
+It is ignored unless applied to the docstring of a class, function or method.
+If it is not specified then the value specified by any
+:directive:`%DefaultDocstringSignature` directive is used.
+
+If ``signature`` is ``"discarded"`` then the automatically generated function
+or method signature is discarded.  In the context of a class's docstring then
+this refers to all of the constructors' docstrings.
+
+If ``signature`` is ``"prepended"`` then the automatically generated function
+or method signature is placed before the docstring.  In the context of a
+class's docstring then this refers to all of the constructors' docstrings.
+
+If ``signature`` is ``"appended"`` then the automatically generated function
+or method signature is placed after the docstring.  In the context of a class's
+docstring then this refers to all of the constructors' docstrings.
 
 For example::
 
@@ -945,12 +979,15 @@ For example::
 
     public:
         Klass();
-    %Docstring deindented
+    %Docstring "deindented"
         This will be appended to the class's docstring and will not be indented.
 
             This will be indented by four spaces.
     %End
     };
+
+.. seealso:: :directive:`%DefaultDocstringFormat`,
+    :directive:`%DefaultDocstringSignature`
 
 
 .. directive:: %End
@@ -1201,7 +1238,7 @@ garbage collector is to do its job, it needs to provide some handwritten code
 to traverse and potentially clear those embedded references.
 
 See the section `Supporting Cyclic Garbage Collection
-<http://docs.python.org/3/c-api/gcsupport.html>`__ in the Python documentation
+<https://docs.python.org/3/c-api/gcsupport.html>`__ in the Python documentation
 for the details.
 
 This directive is used to specify the code that clears any embedded references.
@@ -1355,6 +1392,23 @@ For example::
     }
 
 .. seealso:: :directive:`%AccessCode`, :directive:`%SetCode`
+
+
+.. directive:: %HideNamespace
+
+.. versionadded:: 4.19
+
+.. parsed-literal::
+
+    %HideNamespace(name = *name*)
+
+This directive is used to specify that a C++ namespace, which would normally be
+wrapped as a Python class, is not wrapped.  The contents of the namespace are
+still wrapped but are placed in the module dictionary.  This is usually used
+when a library being wrapped uses a single namespace that includes everything
+in the library.  In Python the module itself performs the same function as the
+namespace and so the namespace would just add an unneccessary extra level of
+indirection.
 
 
 .. directive:: %If
@@ -1913,6 +1967,7 @@ then the pattern should instead be::
             [, keyword_arguments = ["None" | "All" | "Optional"]]
             [, language = *string*]
             [, use_argument_names = [True | False]]
+            [, use_limited_api = [True | False]]
             [, version = *integer*])
     {
         [:directive:`%AutoPyName`]
@@ -1957,6 +2012,12 @@ is set to specify that the real name of the argument, if any, should be used
 instead.  It also affects the name of the variable created when the
 :aanno:`GetWrapper` argument annotation is used.
 
+``use_limited_api`` specifies that the generated code will only use the
+limited Python API defined in PEP 384.  It also ensures that the C preprocessor
+symbol ``Py_LIMITED_API`` is defined before the ``Python.h`` header file is
+included.  Python extensions built in this way are independent of the version
+of Python being used.  It is ignored for Python v2.
+
 ``version`` is an optional version number that is useful if you (or others)
 might create other modules that build on this module, i.e. if another module
 might :directive:`%Import` this module.  Under the covers, a module exports an
@@ -1965,7 +2026,7 @@ version number.  A module built on that module knows the version number of the
 API that it is expecting.  If, when the modules are imported at run-time, the
 version numbers do not match then a Python exception is raised.  The dependent
 module must then be re-built using the correct specification files for the base
-module.
+module.  This is deprecated and ignored in SIP v4.19.
 
 The optional :directive:`%AutoPyName` sub-directive is used to specify a rule
 for automatically providing Python names.
@@ -2200,6 +2261,22 @@ For example::
 
         %Property(name=count, get=get_count, set=set_count)
     };
+
+
+.. directive:: %PreMethodCode
+
+.. versionadded:: 4.19.1
+
+.. parsed-literal::
+
+    %PreMethodCode
+        *code*
+    %End
+
+This directive is used as part of the specification of a global function, class
+method, operator, constructor or destructor to specify handwritten code that
+is inserted before the default code for calling the wrapped function, or
+before the :directive:`%MethodCode` directive if it is also given.
 
 
 .. directive:: %RaiseCode

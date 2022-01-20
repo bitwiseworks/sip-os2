@@ -1,10 +1,10 @@
 Introduction
 ============
 
-This is the reference guide for SIP 4.18.  SIP is a tool for
-automatically generating `Python <http://www.python.org>`__ bindings for C and
+This is the reference guide for SIP 4.19.25.  SIP is a tool for
+automatically generating `Python <https://www.python.org>`__ bindings for C and
 C++ libraries.  SIP was originally developed in 1998 for
-`PyQt <http://www.riverbankcomputing.com/software/pyqt>`__ - the Python
+`PyQt <https://www.riverbankcomputing.com/software/pyqt>`__ - the Python
 bindings for the Qt GUI toolkit - but is suitable for generating bindings for
 any C or C++ library.
 
@@ -17,13 +17,13 @@ started out as a small SWIG.  Unlike SWIG, SIP is specifically designed for
 bringing together Python and C/C++ and goes to great lengths to make the
 integration as tight as possible.
 
-The homepage for SIP is http://www.riverbankcomputing.com/software/sip.  Here
+The homepage for SIP is https://www.riverbankcomputing.com/software/sip.  Here
 you will always find the latest stable version and the latest version of this
 documentation.
 
 SIP can also be downloaded from the
-`Mercurial <http://mercurial.selenic.com/>`__ repository at
-http://www.riverbankcomputing.com/hg/sip.
+`Mercurial <https://www.mercurial-scm.org>`__ repository at
+https://www.riverbankcomputing.com/hg/sip.
 
 
 License
@@ -140,8 +140,14 @@ SIP comprises a number of different components.
 
 - The SIP module (:file:`sip.so` or :file:`sip.pyd`).  This is a Python
   extension module that is imported automatically by SIP generated bindings and
-  provides them with some common utility functions.  See also
-  :ref:`ref-python-api`.
+  provides them with some common utility functions.  Historically the module
+  was installed in the Python installation's ``site-packages`` directory where
+  it was imported by any extension module that needed it, for example
+  :mod:`PyQt4` and :mod:`PyQt5`.  However this approach introduces dependencies
+  between otherwise unrelated packages.  The preferred approach is for each
+  package to include it's own private copy of the module that is installed in
+  the root directory of the package as described in :ref:`ref-private-sip`.
+  See also :ref:`ref-python-api`.
 
 - The SIP build system (:file:`sipconfig.py`).  This is a pure Python module
   that is created when SIP is configured and encapsulates all the necessary
@@ -161,21 +167,56 @@ SIP comprises a number of different components.
 Preparing for SIP v5
 --------------------
 
-The syntax of a SIP specification file will change in SIP v5.  The command line
-options to the SIP code generator will also change.  In order to help users
-manage the transition the following approach will be adopted.
+SIP v4.19 will be the final series of SIP v4 releases.  The next major release
+of SIP will be v5.  SIP v5 will adopt semantic versioning.  SIP v5.0 and SIP
+v5.1 will have different goals.
 
-- Where possible, all incompatible changes will be first implemented in SIP v4.
+The goals of SIP v5.0 will be to:
 
-- When an incompatible change is implemented, the old syntax will be deprecated
-  (with a warning message) but will be supported for the lifetime of v4.
+- remove support for Python v2
+
+- remove support for other Python versions that have reached their end-of-life
+
+- remove support for all features marked as deprecated in SIP v4
+
+- play nicely in a modern Python packaging context (distutils, setuptools,
+  wheels, PyPI) both itself and the packages being generated.
+
+The goals of SIP v5.1 will be to:
+
+- eliminate any remaining inconsistencies in the syntax of specification files
+
+- fill in some gaps in the C/C++ support
+
+- restructure, refactor and rewrite the code as appropriate to ensure that it
+  is easy to test, maintain and enhance over the long term.
+
+All features that will be removed in SIP v5.0 will trigger a deprecation
+warning.  Any new language features added in SIP v5.0 will also be added to
+SIP v4.19.  A set of specification files that does not trigger any deprecation
+warnings with SIP v4.19 will work unchanged with SIP v5.0.
+
+It will be possible to install SIP v4 and SIP v5 for the same Python
+installation without conflict.
+
+New releases of SIP v4.19 and SIP v5.0 will be made in parallel.  During this
+period projects should update their build systems to use SIP v5.  When SIP v5.1
+is released no more SIP v4.19 releases will be made.  It is guaranteed that
+there will be a minimum of six months between the releases of SIP v5.0 and SIP
+v5.1.
+
+SIP v5 will introduce a formal end-of-life policy for Python versions.  When a
+Python version reaches it's end-of-life, support for it will be removed in the
+next minor release of SIP v5.  For example, if the current version of SIP is
+v5.x.y then the support will be removed in v5.x+1.0.  Specifically, SIP v5.0
+will only support Python v3.5 and later.
 
 
 Qt Support
 ----------
 
-SIP has specific support for the creation of bindings based on Digia's Qt
-toolkit.
+SIP has specific support for the creation of bindings for the Qt application
+toolkit from The Qt Company.
 
 The SIP code generator understands the signal/slot type safe callback mechanism
 that Qt uses to connect objects together.  This allows applications to define
