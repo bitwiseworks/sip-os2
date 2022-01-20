@@ -43,6 +43,8 @@ The full set of command line options is:
 
     .. versionadded:: 4.16
 
+    .. deprecated:: 4.19.19
+
     The tag is added to the list of *backstops*.  The option may be given more
     than once if multiple timelines have been defined.  See the
     :directive:`%Timeline` directive for more details.
@@ -61,6 +63,12 @@ The full set of command line options is:
     in specification files using the :directive:`%Doc` and
     :directive:`%ExportedDoc` directives.  By default the file is not
     generated.
+
+.. cmdoption:: -D
+
+    .. versionadded:: 4.19.1
+
+    Code is generated for a debug build of Python.
 
 .. cmdoption:: -e
 
@@ -104,6 +112,14 @@ The full set of command line options is:
 
     All functions and methods will, by default, support passing parameters
     using the Python keyword argument syntax.
+
+.. cmdoption:: -n <NAME>
+
+    .. versionadded:: 4.19.9
+
+    The fully qualified name of the private copy of the :mod:`sip` module.
+    See also the :option:`--sip-module <configure.py --sip-module>` option of
+    the installation script.
 
 .. cmdoption:: -o
 

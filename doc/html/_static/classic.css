@@ -1,16 +1,28 @@
 /*
- * The stylesheet (based on the Sphinx default).
+ * classic.css_t
+ * ~~~~~~~~~~~~~
+ *
+ * Sphinx stylesheet -- classic theme.
+ *
+ * :copyright: Copyright 2007-2020 by the Sphinx team, see AUTHORS.
+ * :license: BSD, see LICENSE for details.
+ *
  */
 
 @import url("basic.css");
 
 /* -- page layout ----------------------------------------------------------- */
 
+html {
+    /* CSS hack for macOS's scrollbar (see #1125) */
+    background-color: #FFFFFF;
+}
+
 body {
-    font-family: 100% Verdana, Arial, Helvetica, sans-serif;
-    font-size: 12px;
+    font-family: sans-serif;
+    font-size: 100%;
     background-color: white;
-    color: black;
+    color: #000;
     margin: 0;
     padding: 0;
 }
@@ -29,15 +41,13 @@ div.bodywrapper {
 }
 
 div.body {
-    background-color: white;
-    color: black;
+    background-color: #ffffff;
+    color: #000000;
     padding: 0 20px 30px 20px;
 }
 
-/* "footer" contains the copyright notice and the Sphinx link. */
 div.footer {
     color: black;
-    background-color: white;
     width: 100%;
     padding: 9px 0 9px 0;
     text-align: center;
@@ -49,7 +59,6 @@ div.footer a {
     text-decoration: underline;
 }
 
-/* "related" contains the title and the previous/next/modules/index links. */
 div.related {
     background-color: white;
     line-height: 30px;
@@ -109,9 +118,16 @@ div.sphinxsidebar input {
     font-size: 1em;
 }
 
-/* -- body styles ----------------------------------------------------------- */
+
+
+/* -- hyperlink styles ------------------------------------------------------ */
 
 a {
+    color: #4186cb;
+    text-decoration: none;
+}
+
+a:visited {
     color: #4186cb;
     text-decoration: none;
 }
@@ -120,62 +136,45 @@ a:hover {
     text-decoration: underline;
 }
 
-div.body p, div.body dd, div.body li {
-    text-align: justify;
-    line-height: 130%;
-}
 
-div.body h1 {
-    font-size: 180%;
-    font-weight: bold;
-    border-left-width: 1px;
-    border-right-width: 1px;
-    border-top-width: 1px;
-    border-bottom-width: 2px;
-    color: white;
+
+/* -- body styles ----------------------------------------------------------- */
+
+div.body h1,
+div.body h2,
+div.body h3,
+div.body h4,
+div.body h5,
+div.body h6 {
+    font-family: 'Trebuchet MS', sans-serif;
     background-color: #4186cb;
-    padding: 5px;
-    margin-top: 20px;
-    -moz-border-radius: 5px;
-    -webkit-border-radius: 5px;
-    -khtml-border-radius: 5px;
-}
-
-div.body h2 {
-    font-size: 140%;
     font-weight: normal;
-    border-left-width: 1px;
-    border-right-width: 1px;
-    border-top-width: 1px;
-    border-bottom-width: 2px;
     color: white;
-    background-color: #4186cb;
-    padding: 5px;
-    margin-top: 20px;
-    -moz-border-radius: 5px;
-    -webkit-border-radius: 5px;
-    -khtml-border-radius: 5px;
+    border-bottom: 1px solid #ccc;
+    margin: 20px -20px 10px -20px;
+    padding: 3px 0 3px 10px;
 }
 
-h1 a, h2 a {
-    color: white;
-    text-decoration: none;
-}
-
-div.body h3 {
-    font-size: 130%;
-    font-weight: bold;
-    color: black;
-}
+div.body h1 { margin-top: 0; font-size: 200%; }
+div.body h2 { font-size: 160%; }
+div.body h3 { font-size: 140%; }
+div.body h4 { font-size: 120%; }
+div.body h5 { font-size: 110%; }
+div.body h6 { font-size: 100%; }
 
 a.headerlink {
-    color: white;
+    color: #4186cb;
     font-size: 0.8em;
     padding: 0 4px 0 4px;
     text-decoration: none;
 }
 
-div.body p, div.body dd, div.body li {
+a.headerlink:hover {
+    background-color: #4186cb;
+    color: white;
+}
+
+div.body p, div.body dd, div.body li, div.body blockquote {
     text-align: justify;
     line-height: 130%;
 }
@@ -225,28 +224,43 @@ p.admonition-title:after {
 
 pre {
     padding: 5px;
-    /*
-     * Note that this isn't our standard "sun" colour which doesn't contrast
-     * too well with the pygments defaults.
-     */
-    background-color: #fff4c0;
-    color: black;
+    background-color: unset;
+    color: unset;
     line-height: 120%;
     border: 1px solid #ac9;
     border-left: none;
     border-right: none;
 }
 
-tt {
+code {
     background-color: #ecf0f3;
     padding: 0 1px 0 1px;
     font-size: 0.95em;
 }
 
-.warning tt {
+th, dl.field-list > dt {
+    background-color: #ede;
+}
+
+.warning code {
     background: #efc2c2;
 }
 
-.note tt {
+.note code {
     background: #d6d6d6;
+}
+
+.viewcode-back {
+    font-family: sans-serif;
+}
+
+div.viewcode-block:target {
+    background-color: #f4debf;
+    border-top: 1px solid #ac9;
+    border-bottom: 1px solid #ac9;
+}
+
+div.code-block-caption {
+    color: #efefef;
+    background-color: #1c4e63;
 }

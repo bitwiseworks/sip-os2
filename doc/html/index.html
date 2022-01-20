@@ -1,33 +1,25 @@
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
-  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 
+<!DOCTYPE html>
 
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html>
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    
-    <title>SIP Reference Guide &mdash; SIP 4.18 Reference Guide</title>
-    
-    <link rel="stylesheet" href="_static/classic.css" type="text/css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SIP Reference Guide &#8212; SIP v4.19.25 Reference Guide</title>
+    <link rel="stylesheet" href="_static/riverbank.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
     
-    <script type="text/javascript">
-      var DOCUMENTATION_OPTIONS = {
-        URL_ROOT:    './',
-        VERSION:     '4.18',
-        COLLAPSE_INDEX: false,
-        FILE_SUFFIX: '.html',
-        HAS_SOURCE:  true
-      };
-    </script>
-    <script type="text/javascript" src="_static/jquery.js"></script>
-    <script type="text/javascript" src="_static/underscore.js"></script>
-    <script type="text/javascript" src="_static/doctools.js"></script>
-    <link rel="shortcut icon" href="_static/logo_tn.ico"/>
-    <link rel="top" title="SIP 4.18 Reference Guide" href="#" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    
+    <link rel="shortcut icon" href="_static/logo_tn.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Introduction" href="introduction.html" /> 
-  </head>
-  <body role="document">
+  </head><body>
     <div class="related" role="navigation" aria-label="related navigation">
       <h3>Navigation</h3>
       <ul>
@@ -40,7 +32,8 @@
         <li class="right" >
           <a href="introduction.html" title="Introduction"
              accesskey="N">next</a> |</li>
-        <li class="nav-item nav-item-0"><a href="#">SIP 4.18 Reference Guide</a> &raquo;</li> 
+        <li class="nav-item nav-item-0"><a href="#">SIP v4.19.25 Reference Guide</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">SIP Reference Guide</a></li> 
       </ul>
     </div>  
 
@@ -62,6 +55,8 @@
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="incompatibilities.html">Potential Incompatibilities with Earlier Versions</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="incompatibilities.html#sip-v4-19-4">SIP v4.19.4</a></li>
+<li class="toctree-l2"><a class="reference internal" href="incompatibilities.html#sip-v4-19">SIP v4.19</a></li>
 <li class="toctree-l2"><a class="reference internal" href="incompatibilities.html#sip-v4-16">SIP v4.16</a></li>
 <li class="toctree-l2"><a class="reference internal" href="incompatibilities.html#sip-v4-14-4">SIP v4.14.4</a></li>
 <li class="toctree-l2"><a class="reference internal" href="incompatibilities.html#sip-v4-12-3">SIP v4.12.3</a></li>
@@ -84,14 +79,16 @@
 <li class="toctree-l2"><a class="reference internal" href="using.html#a-simple-c-example">A Simple C++ Example</a></li>
 <li class="toctree-l2"><a class="reference internal" href="using.html#id7">A Simple C Example</a></li>
 <li class="toctree-l2"><a class="reference internal" href="using.html#a-more-complex-c-example">A More Complex C++ Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="using.html#wrapping-enums">Wrapping Enums</a></li>
 <li class="toctree-l2"><a class="reference internal" href="using.html#ownership-of-objects">Ownership of Objects</a></li>
 <li class="toctree-l2"><a class="reference internal" href="using.html#types-and-meta-types">Types and Meta-types</a></li>
 <li class="toctree-l2"><a class="reference internal" href="using.html#lazy-type-attributes">Lazy Type Attributes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="using.html#support-for-python-s-buffer-interface">Support for Python&#8217;s Buffer Interface</a></li>
+<li class="toctree-l2"><a class="reference internal" href="using.html#overflow-checking">Overflow Checking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="using.html#support-for-python-s-buffer-interface">Support for Python’s Buffer Interface</a></li>
 <li class="toctree-l2"><a class="reference internal" href="using.html#support-for-wide-characters">Support for Wide Characters</a></li>
 <li class="toctree-l2"><a class="reference internal" href="using.html#the-python-global-interpreter-lock">The Python Global Interpreter Lock</a></li>
 <li class="toctree-l2"><a class="reference internal" href="using.html#managing-incompatible-apis">Managing Incompatible APIs</a></li>
-<li class="toctree-l2"><a class="reference internal" href="using.html#building-a-private-copy-of-the-sip-module">Building a Private Copy of the <code class="docutils literal"><span class="pre">sip</span></code> Module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="using.html#writing-converttosubclasscode">Writing <code class="xref std std-directive docutils literal notranslate"><span class="pre">%ConvertToSubClassCode</span></code></a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="command_line.html">The SIP Command Line</a></li>
@@ -120,6 +117,7 @@
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="c_api.html">C API for Handwritten Code</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="c_api.html#event-handlers">Event Handlers</a></li>
 <li class="toctree-l2"><a class="reference internal" href="c_api.html#generated-type-structures">Generated Type Structures</a></li>
 <li class="toctree-l2"><a class="reference internal" href="c_api.html#generated-type-objects">Generated Type Objects</a></li>
 <li class="toctree-l2"><a class="reference internal" href="c_api.html#generated-named-enum-type-objects">Generated Named Enum Type Objects</a></li>
@@ -136,6 +134,7 @@
 </div>
 
 
+            <div class="clearer"></div>
           </div>
         </div>
       </div>
@@ -148,15 +147,15 @@
   <p class="topless"><a href="introduction.html"
                         title="next chapter">Introduction</a></p>
 <div id="searchbox" style="display: none" role="search">
-  <h3>Quick search</h3>
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
     <form class="search" action="search.html" method="get">
-      <input type="text" name="q" />
+      <input type="text" name="q" aria-labelledby="searchlabel" />
       <input type="submit" value="Go" />
-      <input type="hidden" name="check_keywords" value="yes" />
-      <input type="hidden" name="area" value="default" />
     </form>
+    </div>
 </div>
-<script type="text/javascript">$('#searchbox').show(0);</script>
+<script>$('#searchbox').show(0);</script>
         </div>
       </div>
       <div class="clearer"></div>
@@ -173,12 +172,13 @@
         <li class="right" >
           <a href="introduction.html" title="Introduction"
              >next</a> |</li>
-        <li class="nav-item nav-item-0"><a href="#">SIP 4.18 Reference Guide</a> &raquo;</li> 
+        <li class="nav-item nav-item-0"><a href="#">SIP v4.19.25 Reference Guide</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">SIP Reference Guide</a></li> 
       </ul>
     </div>
     <div class="footer" role="contentinfo">
-        &copy; Copyright 2015 Riverbank Computing Limited.
-      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.4.
+        &#169; Copyright 2021 Riverbank Computing Limited.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 3.2.1.
     </div>
   </body>
 </html>

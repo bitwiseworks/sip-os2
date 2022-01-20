@@ -5,6 +5,54 @@ This section describes incompatibilities introduced by particular versions of
 SIP.  Normally these are the removal of previously deprecated features.
 
 
+SIP v4.19.4
+-----------
+
+Converting to C/C++ Enums
+*************************
+
+Prior to this version only traditional C/C++ enums were supported.  They are
+implemented with a SIP-generated type that allows integers to be used whenever
+enum members are expected.  Obtaining the integer value of an enum member
+could be done using the standard Python function :c:func:`PyLong_AsLong()` and
+therefore no specific conversion function was provided by the SIP API.
+
+Starting with this version, C++11 scoped enums are also supported and are
+implemented using Python's :py:mod:`enum` module.  The integer values of
+members of these enums cannot be obtained using :c:func:`PyLong_AsLong()` and
+so :c:func:`sipConvertToEnum()` has been added to the SIP API.  This function
+should be used for converting all types of enum.
+
+
+SIP v4.19
+---------
+
+Deprecation of Module Version Number
+************************************
+
+Prior to this version, the :directive:`%Module` directive allowed a version
+number to be specified for a module.  This was then checked against the version
+numbers (if specified) of any other modules that imported it.  This was
+intended to detect when binary incompatible modules where being used.
+
+Starting with this version the version number is deprecated and is simply
+ignored.  Other internal changes have eliminated the need for this feature.
+
+
+Generated Type Structures for Imported Types
+********************************************
+
+As described in :ref:`ref-type-structures` SIP generates a *type structure* for
+each C structure, C++ class and namespace, mapped type and named enum.  Prior
+to this version every type structure in a module was automatically available to
+any handwritten code in any module that imported it.
+
+Starting with this version only those type structures needed by the generated
+code are automatically available to handwritten code possibly resulting in
+compiler errors.  Handwritten code should be changed to call
+:c:func:`sipFindType()` to obtain a pointer to the required type structure.
+
+
 SIP v4.16
 ---------
 

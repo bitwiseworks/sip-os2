@@ -1,7 +1,7 @@
 /*
  * SIP library code.
  *
- * Copyright (c) 2015 Riverbank Computing Limited <info@riverbankcomputing.com>
+ * Copyright (c) 2019 Riverbank Computing Limited <info@riverbankcomputing.com>
  *
  * This file is part of SIP.
  *
@@ -22,7 +22,6 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "sip.h"
 #include "sipint.h"
 #include "array.h"
 
@@ -201,9 +200,7 @@ static PyObject *sipVoidPtr_setwriteable(sipVoidPtrObject *v, PyObject *arg)
 {
     int rw;
 
-    rw = (int)SIPLong_AsLong(arg);
-
-    if (PyErr_Occurred())
+    if ((rw = PyObject_IsTrue(arg)) < 0)
         return NULL;
 
     v->rw = rw;
@@ -479,7 +476,7 @@ static PyObject *sipVoidPtr_subscript(PyObject *self, PyObject *key)
     {
         Py_ssize_t start, stop, step, slicelength;
 
-        if (sipConvertFromSliceObject(key, v->size, &start, &stop, &step, &slicelength) < 0)
+        if (sip_api_convert_from_slice_object(key, v->size, &start, &stop, &step, &slicelength) < 0)
             return NULL;
 
         if (step != 1)
@@ -536,7 +533,7 @@ static int sipVoidPtr_ass_subscript(PyObject *self, PyObject *key,
     {
         Py_ssize_t stop, step;
 
-        if (sipConvertFromSliceObject(key, v->size, &start, &stop, &step, &size) < 0)
+        if (sip_api_convert_from_slice_object(key, v->size, &start, &stop, &step, &size) < 0)
             return -1;
 
         if (step != 1)
@@ -804,6 +801,9 @@ PyTypeObject sipVoidPtr_Type = {
 #endif
 #if PY_VERSION_HEX >= 0x03040000
     0,                      /* tp_finalize */
+#endif
+#if PY_VERSION_HEX >= 0x03080000
+    0,                      /* tp_vectorcall */
 #endif
 };
 
