@@ -433,7 +433,7 @@ def create_makefiles(macros):
     # The implied code generator installs.
     if not opts.no_tools:
         sip_dir, sip_exe = os.path.split(cfg.sip_bin)
-        if sys.platform == 'win32':
+        if sys.platform in ("win32", "os2knix"):
             sip_exe += '.exe'
 
         all_installs.append((sip_exe, sip_dir))
@@ -449,6 +449,8 @@ def create_makefiles(macros):
     if not opts.no_module:
         if sys.platform == 'win32':
             mod = 'sip.lib' if opts.static else 'sip.pyd'
+        elif sys.platform == 'os2knix':
+            mod = 'sip.a' if opts.static else 'sip.pyd'
         else:
             mod = 'libsip.a' if opts.static else 'sip.so'
 
