@@ -22,6 +22,7 @@ import os
 import stat
 import string
 import re
+from datetime import datetime
 
 
 # These are installation specific values created when SIP was configured.
@@ -1783,8 +1784,18 @@ class ModuleMakefile(Makefile):
                         mfile.write("; \\\n\t echo '%s' >>%s.exp\n" % (self._entry_point, self._target))
 
                 if sys.platform == 'os2knix':
+                    # prepare some needed values for the buildlevel
+                    vendor = os.getenv('VENDOR')
+                    if not vendor:
+                        vendor = "sip build system"
+                    now = datetime.now()
+                    date_time = now.strftime("%d %b %Y %H:%M:%S")
+                    version = os.getenv('VERSION')
+                    if not version:
+                        version = "0.0"
+                    (osname, host, release, osversion, machine) = os.uname()
                     mfile.write("\t@echo 'LIBRARY %s INITINSTANCE TERMINSTANCE' >%s.def\n" % (self._target, self._target))
-                    mfile.write("\t@echo 'DESCRIPTION \"%s\"' >>%s.def\n" % (self._targetorg, self._target))
+                    mfile.write("\t@echo 'DESCRIPTION \"@#%s:%s#@##1## %s     %s::::0::@@%s\"' >>%s.def\n" % (vendor, version, date_time, host, self._targetorg, self._target))
                     mfile.write("\t@echo 'DATA MULTIPLE NONSHARED' >>%s.def\n" % (self._target))
                     mfile.write("\t$(LINK) $(LFLAGS) %s.def -o $(TARGET) $(OFILES) $(LIBS)\n" %(self._target))
                 else:
