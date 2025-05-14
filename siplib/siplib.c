@@ -13747,7 +13747,14 @@ static struct _frame *sip_api_get_frame(int depth)
 
     while (frame != NULL && depth > 0)
     {
+#if PY_VERSION_HEX < 0x03090000
         frame = frame->f_back;
+#else
+        frame = PyFrame_GetBack(frame);
+
+        /* Historically we return a borrowed reference */
+        Py_XDECREF(frame);
+#endif
         --depth;
     }
 
